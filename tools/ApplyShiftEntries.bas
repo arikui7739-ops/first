@@ -1,11 +1,11 @@
 Attribute VB_Name = "ShiftEntryImport"
 Option Explicit
 
-' ã‚·ãƒ•ãƒˆå¸Œæœ› å…¥åŠ›ãƒ„ãƒ¼ãƒ«ã§ã‚³ãƒ”ãƒ¼ã—ãŸå†…å®¹ã‚’ã€ã„ã£ãŸã‚“ã€Œå–è¾¼ç”¨ã€ã‚·ãƒ¼ãƒˆã«
-' æ™®é€šã«è²¼ã‚Šä»˜ã‘ãŸï¼ˆCtrl+Vï¼‰ã‚ã¨ã«ã“ã®ãƒã‚¯ãƒ­ã‚’å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚
-' å–è¾¼ç”¨ã‚·ãƒ¼ãƒˆã®å„è¡Œã‚’æ°åã§æœ¬ç•ªã®ã‚·ãƒ•ãƒˆè¡¨ã«ç…§åˆã—ã€å€¤ã ã‘ã‚’
-' PasteSpecial (SkipBlanks:=True) ã§åæ˜ ã—ã¾ã™ã€‚ç©ºæ¬„ã ã£ãŸæ—¥ã¯
-' æœ¬ç•ªã‚·ãƒ¼ãƒˆã®æ—¢å­˜å†…å®¹ã‚’å¤‰æ›´ã—ã¾ã›ã‚“ã€‚
+' ƒVƒtƒgŠó–] “ü—Íƒc[ƒ‹‚ÅƒRƒs[‚µ‚½“à—e‚ğA‚¢‚Á‚½‚ñuæ—pvƒV[ƒg‚É
+' •’Ê‚É“\‚è•t‚¯‚½iCtrl+Vj‚ ‚Æ‚É‚±‚Ìƒ}ƒNƒ‚ğÀs‚µ‚Ä‚­‚¾‚³‚¢B
+' æ—pƒV[ƒg‚ÌŠes‚ğ–¼‚Å–{”Ô‚ÌƒVƒtƒg•\‚ÉÆ‡‚µA’l‚¾‚¯‚ğ
+' PasteSpecial (SkipBlanks:=True) ‚Å”½‰f‚µ‚Ü‚·B‹ó—“‚¾‚Á‚½“ú‚Í
+' –{”ÔƒV[ƒg‚ÌŠù‘¶“à—e‚ğ•ÏX‚µ‚Ü‚¹‚ñB
 Sub ApplyShiftEntries()
     Dim wsStaging As Worksheet
     Dim wsTarget As Worksheet
@@ -19,23 +19,23 @@ Sub ApplyShiftEntries()
     Dim appliedCount As Long, missingNames As String
 
     On Error Resume Next
-    Set wsStaging = ThisWorkbook.Sheets("å–è¾¼ç”¨")
+    Set wsStaging = ThisWorkbook.Sheets("æ—p")
     On Error GoTo 0
     If wsStaging Is Nothing Then
-        MsgBox "ã€Œå–è¾¼ç”¨ã€ã¨ã„ã†åå‰ã®ã‚·ãƒ¼ãƒˆãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚" & vbCrLf & _
-               "ã‚·ãƒ•ãƒˆå…¥åŠ›ãƒ„ãƒ¼ãƒ«ã§ã‚³ãƒ”ãƒ¼ã—ãŸå†…å®¹ã‚’è²¼ã‚Šä»˜ã‘ãŸã‚·ãƒ¼ãƒˆã®åå‰ã‚’" & _
-               "ã€Œå–è¾¼ç”¨ã€ã«ã—ã¦ã‹ã‚‰ã€ã‚‚ã†ä¸€åº¦å®Ÿè¡Œã—ã¦ãã ã•ã„ã€‚", vbExclamation
+        MsgBox "uæ—pv‚Æ‚¢‚¤–¼‘O‚ÌƒV[ƒg‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB" & vbCrLf & _
+               "ƒVƒtƒg“ü—Íƒc[ƒ‹‚ÅƒRƒs[‚µ‚½“à—e‚ğ“\‚è•t‚¯‚½ƒV[ƒg‚Ì–¼‘O‚ğ" & _
+               "uæ—pv‚É‚µ‚Ä‚©‚çA‚à‚¤ˆê“xÀs‚µ‚Ä‚­‚¾‚³‚¢B", vbExclamation
         Exit Sub
     End If
 
-    targetSheetName = InputBox("è²¼ã‚Šä»˜ã‘å…ˆã®ã‚·ãƒ¼ãƒˆåã‚’å…¥åŠ›ã—ã¦ãã ã•ã„ï¼ˆä¾‹: 8æœˆ ï¼‰", "è²¼ã‚Šä»˜ã‘å…ˆã‚·ãƒ¼ãƒˆ")
+    targetSheetName = InputBox("“\‚è•t‚¯æ‚ÌƒV[ƒg–¼‚ğ“ü—Í‚µ‚Ä‚­‚¾‚³‚¢i—á: 8Œ j", "“\‚è•t‚¯æƒV[ƒg")
     If targetSheetName = "" Then Exit Sub
 
     On Error Resume Next
     Set wsTarget = ThisWorkbook.Sheets(targetSheetName)
     On Error GoTo 0
     If wsTarget Is Nothing Then
-        MsgBox "ã‚·ãƒ¼ãƒˆã€Œ" & targetSheetName & "ã€ãŒè¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã€‚", vbExclamation
+        MsgBox "ƒV[ƒgu" & targetSheetName & "v‚ªŒ©‚Â‚©‚è‚Ü‚¹‚ñB", vbExclamation
         Exit Sub
     End If
 
@@ -43,15 +43,15 @@ Sub ApplyShiftEntries()
 
     On Error Resume Next
     Set nameCell = Application.InputBox( _
-        "ã€Œ" & targetSheetName & "ã€ã‚·ãƒ¼ãƒˆã§ã€1äººç›®ã®æ°åãŒå…¥ã£ã¦ã„ã‚‹ã‚»ãƒ«ã‚’ã‚¯ãƒªãƒƒã‚¯ã—ã¦OKã‚’æŠ¼ã—ã¦ãã ã•ã„ã€‚", _
-        "æ°ååˆ—ã®æŒ‡å®š", Type:=8)
+        "u" & targetSheetName & "vƒV[ƒg‚ÅA1l–Ú‚Ì–¼‚ª“ü‚Á‚Ä‚¢‚éƒZƒ‹‚ğƒNƒŠƒbƒN‚µ‚ÄOK‚ğ‰Ÿ‚µ‚Ä‚­‚¾‚³‚¢B", _
+        "–¼—ñ‚Ìw’è", Type:=8)
     On Error GoTo 0
     If nameCell Is Nothing Then Exit Sub
 
     On Error Resume Next
     Set firstDateCell = Application.InputBox( _
-        "åŒã˜è¡Œã§ã€1æ—¥ç›®ã®å‹¤å‹™æ¬„ï¼ˆä¸€ç•ªå·¦ã®æ—¥ä»˜åˆ—ï¼‰ã®ã‚»ãƒ«ã‚’ã‚¯ãƒªãƒƒã‚¯ã—ã¦OKã‚’æŠ¼ã—ã¦ãã ã•ã„ã€‚", _
-        "æ—¥ä»˜åˆ—ã®æŒ‡å®š", Type:=8)
+        "“¯‚¶s‚ÅA1“ú–Ú‚Ì‹Î–±—“iˆê”Ô¶‚Ì“ú•t—ñj‚ÌƒZƒ‹‚ğƒNƒŠƒbƒN‚µ‚ÄOK‚ğ‰Ÿ‚µ‚Ä‚­‚¾‚³‚¢B", _
+        "“ú•t—ñ‚Ìw’è", Type:=8)
     On Error GoTo 0
     If firstDateCell Is Nothing Then Exit Sub
 
@@ -86,9 +86,9 @@ NextRow:
     Application.CutCopyMode = False
 
     Dim msg As String
-    msg = appliedCount & " ååˆ†ã‚’åæ˜ ã—ã¾ã—ãŸã€‚"
+    msg = appliedCount & " –¼•ª‚ğ”½‰f‚µ‚Ü‚µ‚½B"
     If missingNames <> "" Then
-        msg = msg & vbCrLf & vbCrLf & "ä»¥ä¸‹ã®æ°åã¯ã€Œ" & targetSheetName & "ã€ã«è¦‹ã¤ã‹ã‚Šã¾ã›ã‚“ã§ã—ãŸ:" & vbCrLf & missingNames
+        msg = msg & vbCrLf & vbCrLf & "ˆÈ‰º‚Ì–¼‚Íu" & targetSheetName & "v‚ÉŒ©‚Â‚©‚è‚Ü‚¹‚ñ‚Å‚µ‚½:" & vbCrLf & missingNames
     End If
     MsgBox msg, vbInformation
 End Sub
