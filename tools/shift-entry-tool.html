@@ -1,0 +1,578 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>シフト希望 入力ツール（マウスのみ）</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --text: #1c1e21;
+    --muted: #6b7280;
+    --border: #d7dbe0;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --cell-empty: #f0f1f3;
+    --cell-selected: #2563eb;
+    --cell-selected-text: #ffffff;
+    --work: #dbeafe;
+    --off-req: #fde68a;
+    --off-fixed: #e5e7eb;
+    --paid: #bbf7d0;
+    --absent: #fecaca;
+    --adjust: #fbcfe8;
+    --summer: #fed7aa;
+    --trip: #c7d2fe;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --panel: #202329;
+      --text: #e8e9eb;
+      --muted: #9aa0a8;
+      --border: #33363d;
+      --cell-empty: #2b2e35;
+      --work: #1e3a5f;
+      --off-req: #6b5411;
+      --off-fixed: #3a3d44;
+      --paid: #14532d;
+      --absent: #7f1d1d;
+      --adjust: #701a4d;
+      --summer: #7c3a10;
+      --trip: #312e81;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181d; --panel: #202329; --text: #e8e9eb; --muted: #9aa0a8; --border: #33363d;
+    --cell-empty: #2b2e35; --work:#1e3a5f; --off-req:#6b5411; --off-fixed:#3a3d44; --paid:#14532d;
+    --absent:#7f1d1d; --adjust:#701a4d; --summer:#7c3a10; --trip:#312e81;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1c1e21; --muted: #6b7280; --border: #d7dbe0;
+    --cell-empty:#f0f1f3; --work:#dbeafe; --off-req:#fde68a; --off-fixed:#e5e7eb; --paid:#bbf7d0;
+    --absent:#fecaca; --adjust:#fbcfe8; --summer:#fed7aa; --trip:#c7d2fe;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 13px; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 14px;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 10px; display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;}
+  .panel h2 .arrow { transition: transform .15s; font-size: 11px; }
+  .panel.collapsed .body { display:none; }
+  .panel.collapsed h2 .arrow { transform: rotate(-90deg); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  label { color: var(--muted); font-size: 12px; margin-right:4px; }
+  input[type=date], select, textarea {
+    background: var(--bg); color: var(--text); border:1px solid var(--border); border-radius:6px;
+    padding:6px 8px; font-size:13px;
+  }
+  textarea { width:100%; min-height:90px; font-family:monospace; }
+  button {
+    border:1px solid var(--border); background: var(--panel); color:var(--text);
+    border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button.step { width:30px; padding:6px 0; font-weight:bold; }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .staffnav { display:flex; align-items:center; gap:8px; flex-wrap:wrap; }
+  .staffnav select { min-width: 200px; font-size:15px; padding:8px 10px; }
+  .progress { color: var(--muted); font-size:12px; }
+  .datestrip { display:flex; flex-wrap:wrap; gap:6px; margin: 10px 0; }
+  .daycell {
+    border:2px solid var(--border); border-radius:8px; padding:6px 8px; min-width:64px;
+    text-align:center; cursor:pointer; background: var(--cell-empty); user-select:none;
+  }
+  .daycell .dnum { font-weight:bold; font-size:13px; }
+  .daycell .dwk { font-size:11px; color:var(--muted); }
+  .daycell .dval { font-size:11px; margin-top:3px; min-height:13px; font-weight:bold; white-space:nowrap; }
+  .daycell.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
+  .daycell.st-出勤 { background: var(--work); }
+  .daycell.st-休日 { background: var(--off-fixed); }
+  .daycell.st-希望休 { background: var(--off-req); }
+  .daycell.st-有休 { background: var(--paid); }
+  .daycell.st-欠勤 { background: var(--absent); }
+  .daycell.st-調整休 { background: var(--adjust); }
+  .daycell.st-夏休 { background: var(--summer); }
+  .daycell.st-出張 { background: var(--trip); }
+  .statusbar { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
+  .statusbar button { font-weight:600; }
+  .legend-出勤 { border-left:5px solid #2563eb; }
+  .legend-休日 { border-left:5px solid #6b7280; }
+  .legend-希望休 { border-left:5px solid #ca8a04; }
+  .legend-有休 { border-left:5px solid #16a34a; }
+  .legend-欠勤 { border-left:5px solid #dc2626; }
+  .legend-調整休 { border-left:5px solid #db2777; }
+  .legend-夏休 { border-left:5px solid #ea580c; }
+  .legend-出張 { border-left:5px solid #4338ca; }
+  .legend-clear { border-left:5px solid var(--muted); }
+  .timepick { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
+  .presetbar { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
+  .hint { color: var(--muted); font-size:12px; line-height:1.6; }
+  table.preview { border-collapse:collapse; width:100%; font-size:11px; }
+  table.preview th, table.preview td {
+    border:1px solid var(--border); padding:3px 5px; text-align:center; white-space:nowrap;
+  }
+  table.preview th { background: var(--bg); position:sticky; top:0; }
+  table.preview td.name { text-align:left; font-weight:600; position:sticky; left:0; background:var(--panel); }
+  .previewwrap { overflow:auto; max-height: 420px; border:1px solid var(--border); border-radius:8px; }
+  .toolbar-right { margin-left:auto; display:flex; gap:8px; }
+  .done-badge { color: #16a34a; font-weight:bold; }
+  .copybox { display:none; margin-top:8px; }
+  .copybox textarea { min-height:60px; }
+  .fmt-toggle { display:flex; gap:6px; }
+  .fmt-toggle button.active { background: var(--accent); color:var(--accent-text); border-color:var(--accent); }
+  .flash { transition: background-color .3s; }
+</style>
+</head>
+<body>
+
+<h1>シフト希望 入力ツール（マウスのみ）</h1>
+<p class="sub">左手で希望用紙を見ながら、右手のマウスだけで日付→ステータスの順にクリックして入力できます。最後に行ごと／全員分をコピーし、Excelのシフト表へ「貼り付け（値のみ・空白セルを無視）」で反映してください。</p>
+
+<div class="panel" id="setupPanel">
+  <h2 onclick="togglePanel('setupPanel')"><span class="arrow">▼</span> 初期設定（月ごとに1回だけ）</h2>
+  <div class="body">
+    <div class="row">
+      <label>開始日</label>
+      <input type="date" id="startDate">
+      <label>日数</label>
+      <button class="step" onclick="stepDays(-1)">-</button>
+      <span id="numDaysLabel" style="min-width:28px; text-align:center; display:inline-block;">31</span>
+      <button class="step" onclick="stepDays(1)">+</button>
+      <button onclick="applyDates()">日付を反映</button>
+    </div>
+    <div class="row">
+      <label style="margin-right:0;">表記スタイル（既定）</label>
+      <div class="fmt-toggle">
+        <button id="fmtA" onclick="setDefaultFormat('A')">A: 8：30～17：30（全角コロン）</button>
+        <button id="fmtB" onclick="setDefaultFormat('B')">B: 8:30－17:30（半角コロン）</button>
+      </div>
+    </div>
+    <div class="row" style="align-items:flex-start;">
+      <label style="padding-top:6px;">スタッフ一覧<br>(1行1名)</label>
+      <textarea id="staffList" placeholder="小松 義博&#10;蓮井 岳人&#10;阿部 貴範&#10;..."></textarea>
+    </div>
+    <div class="row">
+      <button class="primary" onclick="saveStaffList()">スタッフ一覧を保存</button>
+      <button onclick="clearAll()">全データをリセット</button>
+      <span class="hint">※ここでの入力だけはキーボードを使いますが、月initial設定時の一度きりです。保存後は自動で記憶されます。</span>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="entryPanel">
+  <h2 onclick="togglePanel('entryPanel')"><span class="arrow">▼</span> 入力</h2>
+  <div class="body">
+    <div class="row staffnav">
+      <button onclick="prevStaff()">◀ 前の人</button>
+      <select id="staffSelect" onchange="onStaffSelect()"></select>
+      <button onclick="nextStaff()">次の人 ▶</button>
+      <button onclick="toggleDone()" id="doneBtn">この人 完了にする</button>
+      <span class="progress" id="progressLabel"></span>
+      <div class="toolbar-right fmt-toggle">
+        <span class="hint" style="margin-right:4px;">この人の表記:</span>
+        <button id="staffFmtA" onclick="setStaffFormat('A')">A</button>
+        <button id="staffFmtB" onclick="setStaffFormat('B')">B</button>
+      </div>
+    </div>
+
+    <div class="hint">① 日付ボタンを1つ以上クリックして選択（複数選択可）→ ② 下のステータスボタンをクリックすると反映されます。</div>
+    <div class="datestrip" id="dateStrip"></div>
+
+    <div class="statusbar" id="statusBar"></div>
+
+    <div class="presetbar" id="presetBar"></div>
+
+    <div class="row timepick">
+      <label>時刻を指定:</label>
+      始
+      <select id="shStart"></select> :
+      <select id="smStart"></select>
+      終
+      <select id="shEnd"></select> :
+      <select id="smEnd"></select>
+      <button onclick="applyCustomTime()">選択した日に適用</button>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="outputPanel">
+  <h2 onclick="togglePanel('outputPanel')"><span class="arrow">▼</span> Excelへの貼り付け</h2>
+  <div class="body">
+    <div class="row">
+      <button class="primary" onclick="copyRow()">この人の行をコピー</button>
+      <button class="primary" onclick="copyAll()">全員分をまとめてコピー</button>
+      <span class="hint">コピー後、Excelでその人（または先頭の人）の氏名セルを選択し「貼り付け → 値の貼り付け（空白セルを無視）」を使うと、既存の内容を消さずに変更箇所だけ反映されます。</span>
+    </div>
+    <div class="copybox" id="copyBox">
+      <textarea id="copyArea" readonly onclick="this.select()"></textarea>
+      <div class="hint">自動コピーが効かない場合はこの欄をクリックして全選択し、Ctrl+C（Macは⌘+C）でコピーしてください。</div>
+    </div>
+
+    <div class="row" style="margin-top:10px;">
+      <label style="margin:0;">プレビュー（全員分の入力状況）</label>
+    </div>
+    <div class="previewwrap">
+      <table class="preview" id="previewTable"></table>
+    </div>
+  </div>
+</div>
+
+<script>
+const WEEKDAYS = ['日','月','火','水','木','金','土'];
+const STATUSES = ['出勤','休日','希望休','有休','欠勤','調整休','夏休','出張'];
+const STORE_KEY = 'shiftEntryTool_v1';
+
+function defaultState() {
+  const today = new Date();
+  const y = today.getFullYear(), m = today.getMonth(), d = 1;
+  const start = new Date(y, m, d);
+  return {
+    startDate: start.toISOString().slice(0,10),
+    numDays: 31,
+    staff: [],
+    staffFormat: {},
+    defaultFormat: 'B',
+    currentIndex: 0,
+    entries: {},
+    done: {}
+  };
+}
+
+let state = load();
+let selectedDays = new Set();
+
+function load() {
+  try {
+    const raw = localStorage.getItem(STORE_KEY);
+    if (raw) return Object.assign(defaultState(), JSON.parse(raw));
+  } catch(e) {}
+  return defaultState();
+}
+function save() {
+  localStorage.setItem(STORE_KEY, JSON.stringify(state));
+}
+
+function togglePanel(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+
+function stepDays(delta) {
+  state.numDays = Math.max(1, Math.min(62, state.numDays + delta));
+  document.getElementById('numDaysLabel').textContent = state.numDays;
+  save();
+}
+
+function getDateList() {
+  const list = [];
+  const start = new Date(state.startDate + 'T00:00:00');
+  for (let i=0;i<state.numDays;i++) {
+    const d = new Date(start);
+    d.setDate(start.getDate()+i);
+    list.push(d);
+  }
+  return list;
+}
+
+function fmtMD(d) {
+  return (d.getMonth()+1) + '/' + d.getDate();
+}
+
+function applyDates() {
+  state.startDate = document.getElementById('startDate').value || state.startDate;
+  save();
+  renderAll();
+}
+
+function setDefaultFormat(f) {
+  state.defaultFormat = f;
+  save();
+  updateFormatButtons();
+}
+function updateFormatButtons() {
+  document.getElementById('fmtA').classList.toggle('active', state.defaultFormat==='A');
+  document.getElementById('fmtB').classList.toggle('active', state.defaultFormat==='B');
+  const name = currentStaffName();
+  const f = (name && state.staffFormat[name]) || state.defaultFormat;
+  document.getElementById('staffFmtA').classList.toggle('active', f==='A');
+  document.getElementById('staffFmtB').classList.toggle('active', f==='B');
+}
+
+function setStaffFormat(f) {
+  const name = currentStaffName();
+  if (!name) return;
+  state.staffFormat[name] = f;
+  save();
+  updateFormatButtons();
+  renderPresets();
+}
+
+function saveStaffList() {
+  const raw = document.getElementById('staffList').value;
+  const names = raw.split('\n').map(s=>s.trim()).filter(Boolean);
+  state.staff = names;
+  for (const n of names) {
+    if (!state.entries[n]) state.entries[n] = {};
+  }
+  if (state.currentIndex >= names.length) state.currentIndex = 0;
+  save();
+  renderAll();
+}
+
+function clearAll() {
+  if (!confirm('入力済みの全データを削除します。よろしいですか？')) return;
+  localStorage.removeItem(STORE_KEY);
+  state = defaultState();
+  selectedDays = new Set();
+  renderAll();
+}
+
+function currentStaffName() {
+  return state.staff[state.currentIndex];
+}
+
+function prevStaff() {
+  if (state.staff.length===0) return;
+  state.currentIndex = (state.currentIndex - 1 + state.staff.length) % state.staff.length;
+  selectedDays = new Set();
+  save();
+  renderAll();
+}
+function nextStaff() {
+  if (state.staff.length===0) return;
+  state.currentIndex = (state.currentIndex + 1) % state.staff.length;
+  selectedDays = new Set();
+  save();
+  renderAll();
+}
+function onStaffSelect() {
+  const sel = document.getElementById('staffSelect');
+  state.currentIndex = parseInt(sel.value, 10) || 0;
+  selectedDays = new Set();
+  save();
+  renderAll();
+}
+
+function toggleDone() {
+  const name = currentStaffName();
+  if (!name) return;
+  state.done[name] = !state.done[name];
+  save();
+  renderAll();
+}
+
+function timeString(startH, startM, endH, endM, style) {
+  const p2 = n => String(n).padStart(2,'0');
+  if (style === 'A') {
+    return `${startH}：${p2(startM)}～${endH}：${p2(endM)}`;
+  }
+  return `${startH}:${p2(startM)}－${endH}:${p2(endM)}`;
+}
+
+const PRESET_TIMES = {
+  A: [[8,0,17,0],[8,30,17,30],[15,0,24,0],[16,0,25,0],[17,0,26,0]],
+  B: [[9,0,17,30],[8,30,17,0],[8,30,13,30],[9,0,13,30]]
+};
+
+function renderPresets() {
+  const name = currentStaffName();
+  const style = (name && state.staffFormat[name]) || state.defaultFormat;
+  const bar = document.getElementById('presetBar');
+  bar.innerHTML = '';
+  for (const [sh,sm,eh,em] of PRESET_TIMES[style]) {
+    const label = timeString(sh,sm,eh,em,style);
+    const btn = document.createElement('button');
+    btn.textContent = label;
+    btn.onclick = () => applyStatus(label);
+    bar.appendChild(btn);
+  }
+}
+
+function renderStatusBar() {
+  const bar = document.getElementById('statusBar');
+  bar.innerHTML = '';
+  for (const s of STATUSES) {
+    const btn = document.createElement('button');
+    btn.textContent = s;
+    btn.className = 'legend-' + s;
+    btn.onclick = () => applyStatus(s);
+    bar.appendChild(btn);
+  }
+  const clearBtn = document.createElement('button');
+  clearBtn.textContent = 'クリア（空欄に戻す）';
+  clearBtn.className = 'legend-clear';
+  clearBtn.onclick = () => applyStatus('');
+  bar.appendChild(clearBtn);
+}
+
+function applyStatus(value) {
+  const name = currentStaffName();
+  if (!name) { alert('先にスタッフ一覧を保存してください。'); return; }
+  if (selectedDays.size === 0) { alert('先に日付を1つ以上クリックして選択してください。'); return; }
+  if (!state.entries[name]) state.entries[name] = {};
+  for (const idx of selectedDays) {
+    if (value === '') delete state.entries[name][idx];
+    else state.entries[name][idx] = value;
+  }
+  selectedDays = new Set();
+  save();
+  renderDateStrip();
+  renderPreview();
+}
+
+function toggleDaySelect(idx) {
+  if (selectedDays.has(idx)) selectedDays.delete(idx);
+  else selectedDays.add(idx);
+  renderDateStrip();
+}
+
+function renderDateStrip() {
+  const strip = document.getElementById('dateStrip');
+  strip.innerHTML = '';
+  const dates = getDateList();
+  const name = currentStaffName();
+  const entries = (name && state.entries[name]) || {};
+  dates.forEach((d, idx) => {
+    const cell = document.createElement('div');
+    const val = entries[idx];
+    let statusClass = '';
+    if (val && STATUSES.includes(val)) statusClass = 'st-' + val;
+    cell.className = 'daycell ' + statusClass + (selectedDays.has(idx) ? ' sel' : '');
+    cell.innerHTML = `<div class="dnum">${fmtMD(d)}</div><div class="dwk">(${WEEKDAYS[d.getDay()]})</div><div class="dval">${val || ''}</div>`;
+    cell.onclick = () => toggleDaySelect(idx);
+    strip.appendChild(cell);
+  });
+}
+
+function populateTimeSelects() {
+  const hs = document.getElementById('shStart'), he = document.getElementById('shEnd');
+  const ms = document.getElementById('smStart'), me = document.getElementById('smEnd');
+  [hs,he].forEach(sel => {
+    sel.innerHTML='';
+    for (let h=0; h<=26; h++) {
+      const o = document.createElement('option'); o.value=h; o.textContent=h; sel.appendChild(o);
+    }
+  });
+  [ms,me].forEach(sel => {
+    sel.innerHTML='';
+    for (let m=0; m<60; m+=5) {
+      const o = document.createElement('option'); o.value=m; o.textContent=String(m).padStart(2,'0'); sel.appendChild(o);
+    }
+  });
+  hs.value = 9; ms.value = 0; he.value = 17; me.value = 30;
+}
+
+function applyCustomTime() {
+  const name = currentStaffName();
+  const style = (name && state.staffFormat[name]) || state.defaultFormat;
+  const sh = parseInt(document.getElementById('shStart').value,10);
+  const sm = parseInt(document.getElementById('smStart').value,10);
+  const eh = parseInt(document.getElementById('shEnd').value,10);
+  const em = parseInt(document.getElementById('smEnd').value,10);
+  applyStatus(timeString(sh,sm,eh,em,style));
+}
+
+function renderStaffSelect() {
+  const sel = document.getElementById('staffSelect');
+  sel.innerHTML = '';
+  state.staff.forEach((name, idx) => {
+    const o = document.createElement('option');
+    o.value = idx;
+    o.textContent = (state.done[name] ? '✔ ' : '') + name;
+    sel.appendChild(o);
+  });
+  sel.value = state.currentIndex;
+}
+
+function renderProgress() {
+  const total = state.staff.length;
+  const doneCount = state.staff.filter(n => state.done[n]).length;
+  document.getElementById('progressLabel').textContent = total ? `${doneCount} / ${total} 人 完了` : 'スタッフ未登録';
+  const name = currentStaffName();
+  const btn = document.getElementById('doneBtn');
+  if (name) btn.textContent = state.done[name] ? 'この人 完了を取り消す' : 'この人 完了にする';
+}
+
+function buildRow(name) {
+  const dates = getDateList();
+  const entries = state.entries[name] || {};
+  const row = [name];
+  dates.forEach((d, idx) => row.push(entries[idx] || ''));
+  return row;
+}
+
+function copyTextToClipboard(text) {
+  const box = document.getElementById('copyBox');
+  const area = document.getElementById('copyArea');
+  area.value = text;
+  box.style.display = 'block';
+  if (navigator.clipboard && navigator.clipboard.writeText) {
+    navigator.clipboard.writeText(text).catch(() => fallbackCopy(area));
+  } else {
+    fallbackCopy(area);
+  }
+}
+function fallbackCopy(area) {
+  area.select();
+  try { document.execCommand('copy'); } catch(e) {}
+}
+
+function copyRow() {
+  const name = currentStaffName();
+  if (!name) return;
+  const row = buildRow(name);
+  copyTextToClipboard(row.join('\t'));
+}
+
+function copyAll() {
+  if (state.staff.length === 0) return;
+  const lines = state.staff.map(buildRow).map(r => r.join('\t'));
+  copyTextToClipboard(lines.join('\n'));
+}
+
+function renderPreview() {
+  const table = document.getElementById('previewTable');
+  const dates = getDateList();
+  let html = '<thead><tr><th>氏名</th>';
+  dates.forEach(d => html += `<th>${fmtMD(d)}<br>(${WEEKDAYS[d.getDay()]})</th>`);
+  html += '</tr></thead><tbody>';
+  state.staff.forEach(name => {
+    const entries = state.entries[name] || {};
+    html += `<tr><td class="name">${state.done[name] ? '✔ ' : ''}${name}</td>`;
+    dates.forEach((d, idx) => {
+      const v = entries[idx] || '';
+      html += `<td>${v}</td>`;
+    });
+    html += '</tr>';
+  });
+  html += '</tbody>';
+  table.innerHTML = html;
+}
+
+function renderAll() {
+  document.getElementById('startDate').value = state.startDate;
+  document.getElementById('numDaysLabel').textContent = state.numDays;
+  document.getElementById('staffList').value = state.staff.join('\n');
+  updateFormatButtons();
+  renderStaffSelect();
+  renderStatusBar();
+  renderPresets();
+  renderDateStrip();
+  renderProgress();
+  renderPreview();
+}
+
+populateTimeSelects();
+renderAll();
+</script>
+</body>
+</html>
