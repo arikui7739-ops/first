@@ -23,6 +23,7 @@
     --adjust: #fbcfe8;
     --summer: #fed7aa;
     --trip: #c7d2fe;
+    --legal: #c7d2e0;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -40,17 +41,18 @@
       --adjust: #701a4d;
       --summer: #7c3a10;
       --trip: #312e81;
+      --legal: #3b4252;
     }
   }
   :root[data-theme="dark"] {
     --bg: #16181d; --panel: #202329; --text: #e8e9eb; --muted: #9aa0a8; --border: #33363d;
     --cell-empty: #2b2e35; --work:#1e3a5f; --off-req:#6b5411; --off-fixed:#3a3d44; --paid:#14532d;
-    --absent:#7f1d1d; --adjust:#701a4d; --summer:#7c3a10; --trip:#312e81;
+    --absent:#7f1d1d; --adjust:#701a4d; --summer:#7c3a10; --trip:#312e81; --legal:#3b4252;
   }
   :root[data-theme="light"] {
     --bg: #f4f5f7; --panel: #ffffff; --text: #1c1e21; --muted: #6b7280; --border: #d7dbe0;
     --cell-empty:#f0f1f3; --work:#dbeafe; --off-req:#fde68a; --off-fixed:#e5e7eb; --paid:#bbf7d0;
-    --absent:#fecaca; --adjust:#fbcfe8; --summer:#fed7aa; --trip:#c7d2fe;
+    --absent:#fecaca; --adjust:#fbcfe8; --summer:#fed7aa; --trip:#c7d2fe; --legal:#c7d2e0;
   }
   * { box-sizing: border-box; }
   body {
@@ -97,23 +99,32 @@
   .daycell.sel { border-color: var(--accent); box-shadow: 0 0 0 2px var(--accent) inset; }
   .daycell.st-出勤 { background: var(--work); }
   .daycell.st-休日 { background: var(--off-fixed); }
-  .daycell.st-希望休 { background: var(--off-req); }
+  .daycell.st-所休 { background: var(--off-req); }
   .daycell.st-有休 { background: var(--paid); }
   .daycell.st-欠勤 { background: var(--absent); }
   .daycell.st-調整休 { background: var(--adjust); }
   .daycell.st-夏休 { background: var(--summer); }
   .daycell.st-出張 { background: var(--trip); }
+  .daycell.st-法休 { background: var(--legal); }
+  .daycell.auto { border-style: dashed; opacity: .75; }
+  .daycell .dtag { font-size:9px; color: var(--muted); }
   .statusbar { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
   .statusbar button { font-weight:600; }
   .legend-出勤 { border-left:5px solid #2563eb; }
   .legend-休日 { border-left:5px solid #6b7280; }
-  .legend-希望休 { border-left:5px solid #ca8a04; }
+  .legend-所休 { border-left:5px solid #ca8a04; }
   .legend-有休 { border-left:5px solid #16a34a; }
   .legend-欠勤 { border-left:5px solid #dc2626; }
   .legend-調整休 { border-left:5px solid #db2777; }
   .legend-夏休 { border-left:5px solid #ea580c; }
   .legend-出張 { border-left:5px solid #4338ca; }
+  .legend-法休 { border-left:5px solid #64748b; }
   .legend-clear { border-left:5px solid var(--muted); }
+  .colorkey { display:flex; flex-wrap:wrap; gap:14px; margin: 6px 0 2px; font-size:12px; color:var(--muted); align-items:center; }
+  .colorkey .swatch { display:inline-block; width:14px; height:14px; border-radius:3px; vertical-align:middle; margin-right:4px; border:1px solid var(--border); }
+  .colorkey .swatch.solid { }
+  .colorkey .swatch.dashed { border-style:dashed; opacity:.75; }
+  .colorkey .swatch.blank { background: var(--cell-empty); }
   .timepick { display:flex; gap:6px; align-items:center; flex-wrap:wrap; }
   .presetbar { display:flex; gap:6px; flex-wrap:wrap; margin:8px 0; }
   .hint { color: var(--muted); font-size:12px; line-height:1.6; }
@@ -136,7 +147,7 @@
 <body>
 
 <h1>シフト希望 入力ツール（マウスのみ）</h1>
-<p class="sub">左手で希望用紙を見ながら、右手のマウスだけで日付→ステータスの順にクリックして入力できます。最後に行ごと／全員分をコピーし、Excelのシフト表へ「貼り付け（値のみ・空白セルを無視）」で反映してください。</p>
+<p class="sub">左手で希望用紙を見ながら、右手のマウスだけで日付→ステータスの順にクリックして入力できます。日曜日は自動的に「法休」扱いになります。最後に行ごと／全員分をコピーし、Excelのシフト表へ「形式を選択して貼り付け（空白セルを無視）」で反映してください（手順は下部に記載）。</p>
 
 <div class="panel" id="setupPanel">
   <h2 onclick="togglePanel('setupPanel')"><span class="arrow">▼</span> 初期設定（月ごとに1回だけ）</h2>
@@ -185,7 +196,12 @@
       </div>
     </div>
 
-    <div class="hint">① 日付ボタンを1つ以上クリックして選択（複数選択可）→ ② 下のステータスボタンをクリックすると反映されます。</div>
+    <div class="hint">① 日付ボタンを1つ以上クリックして選択（複数選択可）→ ② 下のステータスボタンをクリックすると反映されます。日曜日は未入力でも自動的に「法休」として扱われます（点線＝自動、別の予定があれば上書き可）。</div>
+    <div class="colorkey">
+      <span><span class="swatch blank"></span>未入力（Excelの既存値を残す）</span>
+      <span><span class="swatch dashed" style="background:var(--legal);"></span>自動固定（日曜＝法休、未クリック）</span>
+      <span><span class="swatch solid" style="background:var(--off-req);"></span>手動で入力済み（実線＝クリックして設定）</span>
+    </div>
     <div class="datestrip" id="dateStrip"></div>
 
     <div class="statusbar" id="statusBar"></div>
@@ -211,7 +227,13 @@
     <div class="row">
       <button class="primary" onclick="copyRow()">この人の行をコピー</button>
       <button class="primary" onclick="copyAll()">全員分をまとめてコピー</button>
-      <span class="hint">コピー後、Excelでその人（または先頭の人）の氏名セルを選択し「貼り付け → 値の貼り付け（空白セルを無視）」を使うと、既存の内容を消さずに変更箇所だけ反映されます。</span>
+    </div>
+    <div class="hint">
+      <b>Excelへの貼り付け手順（「空白セルを無視」は通常のCtrl+V後に出る簡易オプションには出ません。必ず下記の手順で）：</b><br>
+      ① コピー後、Excelでその人（全員分の場合は先頭の人）の氏名セルを選択<br>
+      ② <b>Ctrl+Alt+V</b>（Macは <b>⌘+Option+V</b>）を押す、または右クリック→「形式を選択して貼り付け」<br>
+      ③ ダイアログ下部の「<b>空白セルを無視する</b>」にチェック → OK<br>
+      これで、入力した箇所だけが上書きされ、空欄のままの日（未入力＝Excel既存のまま残したいセル）は変更されません。
     </div>
     <div class="copybox" id="copyBox">
       <textarea id="copyArea" readonly onclick="this.select()"></textarea>
@@ -229,7 +251,8 @@
 
 <script>
 const WEEKDAYS = ['日','月','火','水','木','金','土'];
-const STATUSES = ['出勤','休日','希望休','有休','欠勤','調整休','夏休','出張'];
+const STATUSES = ['出勤','休日','所休','有休','欠勤','調整休','夏休','出張','法休'];
+const AUTO_WEEKDAY_STATUS = { 0: '法休' }; // 0 = Sunday: fixed as 法休 unless overridden
 const STORE_KEY = 'shiftEntryTool_v1';
 
 function defaultState() {
@@ -254,9 +277,22 @@ let selectedDays = new Set();
 function load() {
   try {
     const raw = localStorage.getItem(STORE_KEY);
-    if (raw) return Object.assign(defaultState(), JSON.parse(raw));
+    if (raw) {
+      const s = Object.assign(defaultState(), JSON.parse(raw));
+      migrateLegacyLabels(s);
+      return s;
+    }
   } catch(e) {}
   return defaultState();
+}
+function migrateLegacyLabels(s) {
+  // old builds used "希望休"; rename to "所休" in any already-saved entries
+  for (const name of Object.keys(s.entries || {})) {
+    const entries = s.entries[name];
+    for (const idx of Object.keys(entries)) {
+      if (entries[idx] === '希望休') entries[idx] = '所休';
+    }
+  }
 }
 function save() {
   localStorage.setItem(STORE_KEY, JSON.stringify(state));
@@ -285,6 +321,20 @@ function getDateList() {
 
 function fmtMD(d) {
   return (d.getMonth()+1) + '/' + d.getDate();
+}
+
+function getAutoStatus(date) {
+  return AUTO_WEEKDAY_STATUS[date.getDay()] || null;
+}
+
+// Returns { value, auto } — auto:true means the value comes from the
+// weekday default (e.g. Sunday = 法休) and was not explicitly clicked.
+function getEffectiveValue(name, idx, date) {
+  const entries = (name && state.entries[name]) || {};
+  if (entries[idx] !== undefined) return { value: entries[idx], auto: false };
+  const auto = getAutoStatus(date);
+  if (auto) return { value: auto, auto: true };
+  return { value: '', auto: false };
 }
 
 function applyDates() {
@@ -440,14 +490,13 @@ function renderDateStrip() {
   strip.innerHTML = '';
   const dates = getDateList();
   const name = currentStaffName();
-  const entries = (name && state.entries[name]) || {};
   dates.forEach((d, idx) => {
     const cell = document.createElement('div');
-    const val = entries[idx];
+    const eff = getEffectiveValue(name, idx, d);
     let statusClass = '';
-    if (val && STATUSES.includes(val)) statusClass = 'st-' + val;
-    cell.className = 'daycell ' + statusClass + (selectedDays.has(idx) ? ' sel' : '');
-    cell.innerHTML = `<div class="dnum">${fmtMD(d)}</div><div class="dwk">(${WEEKDAYS[d.getDay()]})</div><div class="dval">${val || ''}</div>`;
+    if (eff.value && STATUSES.includes(eff.value)) statusClass = 'st-' + eff.value;
+    cell.className = 'daycell ' + statusClass + (eff.auto ? ' auto' : '') + (selectedDays.has(idx) ? ' sel' : '');
+    cell.innerHTML = `<div class="dnum">${fmtMD(d)}</div><div class="dwk">(${WEEKDAYS[d.getDay()]})</div><div class="dval">${eff.value || ''}</div>${eff.auto ? '<div class="dtag">自動</div>' : ''}`;
     cell.onclick = () => toggleDaySelect(idx);
     strip.appendChild(cell);
   });
@@ -504,9 +553,8 @@ function renderProgress() {
 
 function buildRow(name) {
   const dates = getDateList();
-  const entries = state.entries[name] || {};
   const row = [name];
-  dates.forEach((d, idx) => row.push(entries[idx] || ''));
+  dates.forEach((d, idx) => row.push(getEffectiveValue(name, idx, d).value));
   return row;
 }
 
@@ -546,11 +594,11 @@ function renderPreview() {
   dates.forEach(d => html += `<th>${fmtMD(d)}<br>(${WEEKDAYS[d.getDay()]})</th>`);
   html += '</tr></thead><tbody>';
   state.staff.forEach(name => {
-    const entries = state.entries[name] || {};
     html += `<tr><td class="name">${state.done[name] ? '✔ ' : ''}${name}</td>`;
     dates.forEach((d, idx) => {
-      const v = entries[idx] || '';
-      html += `<td>${v}</td>`;
+      const eff = getEffectiveValue(name, idx, d);
+      const style = eff.auto ? ' style="color:var(--muted);font-style:italic;"' : '';
+      html += `<td${style}>${eff.value}</td>`;
     });
     html += '</tr>';
   });
