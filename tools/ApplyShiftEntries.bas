@@ -6,6 +6,8 @@ Option Explicit
 ' 取込用シートの各行を氏名で本番のシフト表に照合し、値だけを
 ' PasteSpecial (SkipBlanks:=True) で反映します。空欄だった日は
 ' 本番シートの既存内容を変更しません。
+' あわせて、反映したセルの文字色を入力ツールと同じ配色にします
+' （所休・法休＝赤字、有休＝青字、それ以外＝黒字）。
 Sub ApplyShiftEntries()
     Dim wsStaging As Worksheet
     Dim wsTarget As Worksheet
@@ -79,6 +81,17 @@ Sub ApplyShiftEntries()
 
         srcRange.Copy
         destRange.PasteSpecial Paste:=xlPasteValues, SkipBlanks:=True
+
+        Dim destFull As Range, j As Long
+        Set destFull = wsTarget.Range( _
+            wsTarget.Cells(foundCell.Row, firstDateCell.Column), _
+            wsTarget.Cells(foundCell.Row, firstDateCell.Column + srcRange.Columns.Count - 1))
+        For j = 1 To srcRange.Columns.Count
+            If Trim(srcRange.Cells(1, j).Value & "") <> "" Then
+                ApplyStatusFontColor destFull.Cells(1, j), CStr(srcRange.Cells(1, j).Value)
+            End If
+        Next j
+
         appliedCount = appliedCount + 1
 NextRow:
     Next i
@@ -91,4 +104,17 @@ NextRow:
         msg = msg & vbCrLf & vbCrLf & "以下の氏名は「" & targetSheetName & "」に見つかりませんでした:" & vbCrLf & missingNames
     End If
     MsgBox msg, vbInformation
+End Sub
+
+' シフト入力ツールの配色（所休・法休＝赤字、有休＝青字、それ以外＝黒字）
+' に合わせて、反映したセル1つ分の文字色を設定する。
+Private Sub ApplyStatusFontColor(cell As Range, ByVal value As String)
+    Select Case Trim(value)
+        Case "所休", "法休"
+            cell.Font.Color = RGB(200, 30, 30)
+        Case "有休"
+            cell.Font.Color = RGB(29, 78, 216)
+        Case Else
+            cell.Font.Color = RGB(0, 0, 0)
+    End Select
 End Sub
