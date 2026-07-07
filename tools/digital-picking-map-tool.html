@@ -124,7 +124,7 @@
   <h2 onclick="togglePanel('mapPanel')"><span class="arrow">▼</span> 2. 石狩Cバラマップ（号-段-列）</h2>
   <div class="body">
     <div class="row">
-      <span class="hint">号: 68→61, 58→51（59・60は欠番）／列: 1〜4／段: 1〜14。セルの値は出荷回数。</span>
+      <span class="hint">号: 68→61, 58→51（59・60は欠番）／列: 1〜4／段: 1〜9。セルの値は出荷回数。</span>
       <button id="mapCsvBtn" disabled>CSVダウンロード</button>
     </div>
     <div class="legend" id="mapLegend"></div>
@@ -171,7 +171,7 @@
 const MAIN_UNITS = Array.from({length:46}, (_,i)=>i+1); // 1-46
 const C_ZONE_UNITS = [68,67,66,65,64,63,62,61, 58,57,56,55,54,53,52,51]; // 68(左)...61, 58...51(右), 59/60欠番
 const FORMATION_SIZE = 6;
-const MAP_MAX_POS = 14;
+const MAP_MAX_POS = 9;
 
 // count gradient for 号機別ピッキング回数 / 編成別投入回数: 1=薄い青 -> 6+=濃い青
 const COUNT_LOW = [0xDD, 0xEB, 0xF7];
