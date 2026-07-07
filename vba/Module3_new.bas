@@ -404,13 +404,15 @@ Sub OptimizeABFormationFlow()
         ' 対面同時ヒット状況のヒートマップ（1&2号機～45&46号機の物理配置順に23ゾーンを帯状に表示）
         ' ※1～4号機はスワップ候補・AB号機使用比率スコアの対象外だが、ヒートマップは実態を見るためdictPairsAll(全AB間口)を使う
         Dim zoneCrossHit(1 To 23) As Double
+        Dim zoneTotalHit(1 To 23) As Double ' そのゾーンの同時ヒット総数（対面＋同号機側）。対面比率(%)の分母
         Dim pk As Variant, pkParts() As String
         For Each pk In dictPairsAll.Keys
-            If dictCrossFaceAll.Exists(pk) Then
-                pkParts = Split(CStr(pk), ",")
-                If dictItemZoneAll.Exists(pkParts(0)) Then
-                    Dim pZone As Integer: pZone = CInt(dictItemZoneAll(pkParts(0)))
-                    If pZone >= 1 And pZone <= 23 Then
+            pkParts = Split(CStr(pk), ",")
+            If dictItemZoneAll.Exists(pkParts(0)) Then
+                Dim pZone As Integer: pZone = CInt(dictItemZoneAll(pkParts(0)))
+                If pZone >= 1 And pZone <= 23 Then
+                    zoneTotalHit(pZone) = zoneTotalHit(pZone) + dictPairsAll(pk)
+                    If dictCrossFaceAll.Exists(pk) Then
                         zoneCrossHit(pZone) = zoneCrossHit(pZone) + dictPairsAll(pk)
                     End If
                 End If
@@ -426,6 +428,7 @@ Sub OptimizeABFormationFlow()
         Dim heatTitleRow As Long: heatTitleRow = 4 + outCnt + 3
         Dim heatLabelRow As Long: heatLabelRow = heatTitleRow + 1
         Dim heatValueRow As Long: heatValueRow = heatTitleRow + 2
+        Dim heatPctRow As Long: heatPctRow = heatTitleRow + 3
 
         ' 本表(A:M)と列を共有すると列幅が本表側に引っ張られて広くなるため、O列(15列目)以降の未使用列にコンパクトな幅で配置する
         Const HEAT_COL_OFFSET As Long = 14 ' 15列目(O)から開始
@@ -433,7 +436,7 @@ Sub OptimizeABFormationFlow()
         Dim heatLastCol As Long: heatLastCol = HEAT_COL_OFFSET + 23
 
         wsOut.Range(wsOut.Cells(heatTitleRow, heatFirstCol), wsOut.Cells(heatTitleRow, heatLastCol)).Merge
-        wsOut.Cells(heatTitleRow, heatFirstCol).Value = "【対面同時ヒット状況（ゾーン別ヒートマップ）】　色が濃いほど対面での同時出荷（同じ編成内での競合）が多い"
+        wsOut.Cells(heatTitleRow, heatFirstCol).Value = "【対面同時ヒット状況（ゾーン別ヒートマップ）】　色が濃いほど対面での同時出荷（同じ編成内での競合）が多い。％はそのゾーン内の同時ヒットのうち対面だった割合"
         wsOut.Cells(heatTitleRow, heatFirstCol).Font.Bold = True: wsOut.Cells(heatTitleRow, heatFirstCol).Font.Size = 12
         wsOut.Cells(heatTitleRow, heatFirstCol).HorizontalAlignment = xlLeft
 
@@ -453,8 +456,16 @@ Sub OptimizeABFormationFlow()
             If maxCross > 0 Then crossRatio = zoneCrossHit(zi) / maxCross Else crossRatio = 0
             Dim gb As Integer: gb = 255 - CInt(155 * crossRatio) ' 0件=白、最大件数=濃い赤
             wsOut.Cells(heatValueRow, heatCol).Interior.Color = RGB(255, gb, gb)
+
+            ' ゾーン内比率(%)＝そのゾーンの同時ヒットのうち対面だった割合（号機選びの精度を見る指標）
+            Dim zonePct As Double
+            If zoneTotalHit(zi) > 0 Then zonePct = zoneCrossHit(zi) / zoneTotalHit(zi) * 100 Else zonePct = 0
+            wsOut.Cells(heatPctRow, heatCol).Value = zonePct / 100
+            wsOut.Cells(heatPctRow, heatCol).NumberFormat = "0%"
+            wsOut.Cells(heatPctRow, heatCol).Font.Size = 8
+            wsOut.Cells(heatPctRow, heatCol).HorizontalAlignment = xlCenter
         Next zi
-        wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatValueRow, heatLastCol)).Borders.LineStyle = xlContinuous
+        wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatPctRow, heatLastCol)).Borders.LineStyle = xlContinuous
 
         ' KPI記録：AB号機使用比率スコア（号機回数比の目標比率＝理論値 と、実績ファイル集計＝実績値 の近さ）
         Dim abRatioScore As Variant: abRatioScore = ""
