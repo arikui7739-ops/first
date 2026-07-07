@@ -16,6 +16,14 @@ Sub OptimizeABFormationFlow()
     Dim orderCountInFormation As Long: orderCountInFormation = 0
     Dim dictAllHit As Object: Set dictAllHit = CreateObject("Scripting.Dictionary") ' AB占有率スコア用：全ゾーンのヒット数
 
+    ' ヒートマップ表示専用（スワップ対象外の1～4号機も含めた全AB間口のゾーン・対面情報）
+    ' ※スワップ候補探索・AB号機使用比率スコアからは1～4号機を除外する方針は変えず、ヒートマップ表示だけ実態を反映する
+    Dim dictItemZoneAll As Object: Set dictItemZoneAll = CreateObject("Scripting.Dictionary")
+    Dim dictItemMachAll As Object: Set dictItemMachAll = CreateObject("Scripting.Dictionary")
+    Dim dictPairsAll As Object: Set dictPairsAll = CreateObject("Scripting.Dictionary")
+    Dim dictCrossFaceAll As Object: Set dictCrossFaceAll = CreateObject("Scripting.Dictionary")
+    Dim currentFormationItemsAll As Object: Set currentFormationItemsAll = CreateObject("Scripting.Dictionary")
+
     ' 0. CFシートから ロケーション→品名・商品コード の対応表を先に作っておく
     Dim dictLocName As Object: Set dictLocName = CreateObject("Scripting.Dictionary")
     Dim dictLocCode As Object: Set dictLocCode = CreateObject("Scripting.Dictionary")
@@ -65,6 +73,8 @@ Sub OptimizeABFormationFlow()
         If fIdx > 1 Then
             Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
             currentFormationItems.RemoveAll
+            Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
+            currentFormationItemsAll.RemoveAll
             orderCountInFormation = 0
         End If
 
@@ -91,6 +101,8 @@ Sub OptimizeABFormationFlow()
                     ' 在庫数サマリー行。直前の編成を確定し、以降のE行(在庫数)はオーダーとして扱わない
                     Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
                     currentFormationItems.RemoveAll
+                    Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
+                    currentFormationItemsAll.RemoveAll
                     skipMode = True
                 Else
                     skipMode = False
@@ -98,6 +110,8 @@ Sub OptimizeABFormationFlow()
                     If orderCountInFormation > 6 Then
                         Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
                         currentFormationItems.RemoveAll
+                        Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
+                        currentFormationItemsAll.RemoveAll
                         orderCountInFormation = 1
                     End If
                 End If
@@ -120,10 +134,17 @@ Sub OptimizeABFormationFlow()
                         End If
 
                         If mach >= 1 And mach <= 46 Then
-                            If Not IsExcludedSlot3(mach, retsu) Then
-                                Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
-                                Dim zoneNum As Integer: zoneNum = Int((mach - 1) / 2) + 1 ' 1&2→1, 3&4→2 ... 45&46→23
+                            Dim zoneNum As Integer: zoneNum = Int((mach - 1) / 2) + 1 ' 1&2→1, 3&4→2 ... 45&46→23
+                            Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
 
+                            ' ヒートマップ用：1～4号機も含めた全AB間口（中量棚のみ除く）でゾーン・対面情報を記録
+                            If Not ((mach = 1 Or mach = 2) And retsu >= 6 And retsu <= 14) Then
+                                dictItemZoneAll(locKey) = zoneNum
+                                dictItemMachAll(locKey) = mach
+                                currentFormationItemsAll(locKey) = 1
+                            End If
+
+                            If Not IsExcludedSlot3(mach, retsu) Then
                                 dictItemLoc(locKey) = mach & "-" & Format(dan, "00") & "-" & Format(retsu, "00")
                                 dictItemMach(locKey) = mach
                                 dictItemZone(locKey) = zoneNum
@@ -139,6 +160,7 @@ Sub OptimizeABFormationFlow()
     Next fIdx
     ' 最後の編成（6件に満たない端数も含む）を締める
     Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
+    Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
 
     ' 2.5 現在の奇数号機側・偶数号機側の合計ヒット数を算出（バランス調整の基準値。以降スワップのたびに更新する）
     Dim oddTotal As Double, evenTotal As Double
@@ -380,15 +402,16 @@ Sub OptimizeABFormationFlow()
         wsOut.Columns("A:M").AutoFit
 
         ' 対面同時ヒット状況のヒートマップ（1&2号機～45&46号機の物理配置順に23ゾーンを帯状に表示）
+        ' ※1～4号機はスワップ候補・AB号機使用比率スコアの対象外だが、ヒートマップは実態を見るためdictPairsAll(全AB間口)を使う
         Dim zoneCrossHit(1 To 23) As Double
         Dim pk As Variant, pkParts() As String
-        For Each pk In dictPairs.Keys
-            If dictCrossFace.Exists(pk) Then
+        For Each pk In dictPairsAll.Keys
+            If dictCrossFaceAll.Exists(pk) Then
                 pkParts = Split(CStr(pk), ",")
-                If dictItemZone.Exists(pkParts(0)) Then
-                    Dim pZone As Integer: pZone = CInt(dictItemZone(pkParts(0)))
+                If dictItemZoneAll.Exists(pkParts(0)) Then
+                    Dim pZone As Integer: pZone = CInt(dictItemZoneAll(pkParts(0)))
                     If pZone >= 1 And pZone <= 23 Then
-                        zoneCrossHit(pZone) = zoneCrossHit(pZone) + dictPairs(pk)
+                        zoneCrossHit(pZone) = zoneCrossHit(pZone) + dictPairsAll(pk)
                     End If
                 End If
             End If
@@ -404,28 +427,34 @@ Sub OptimizeABFormationFlow()
         Dim heatLabelRow As Long: heatLabelRow = heatTitleRow + 1
         Dim heatValueRow As Long: heatValueRow = heatTitleRow + 2
 
-        wsOut.Range(wsOut.Cells(heatTitleRow, 1), wsOut.Cells(heatTitleRow, 23)).Merge
-        wsOut.Cells(heatTitleRow, 1).Value = "【対面同時ヒット状況（ゾーン別ヒートマップ）】　色が濃いほど対面での同時出荷（同じ編成内での競合）が多い"
-        wsOut.Cells(heatTitleRow, 1).Font.Bold = True: wsOut.Cells(heatTitleRow, 1).Font.Size = 12
-        wsOut.Cells(heatTitleRow, 1).HorizontalAlignment = xlLeft
+        ' 本表(A:M)と列を共有すると列幅が本表側に引っ張られて広くなるため、O列(15列目)以降の未使用列にコンパクトな幅で配置する
+        Const HEAT_COL_OFFSET As Long = 14 ' 15列目(O)から開始
+        Dim heatFirstCol As Long: heatFirstCol = HEAT_COL_OFFSET + 1
+        Dim heatLastCol As Long: heatLastCol = HEAT_COL_OFFSET + 23
 
-        wsOut.Range(wsOut.Cells(heatLabelRow, 14), wsOut.Cells(heatLabelRow, 23)).EntireColumn.ColumnWidth = 7
+        wsOut.Range(wsOut.Cells(heatTitleRow, heatFirstCol), wsOut.Cells(heatTitleRow, heatLastCol)).Merge
+        wsOut.Cells(heatTitleRow, heatFirstCol).Value = "【対面同時ヒット状況（ゾーン別ヒートマップ）】　色が濃いほど対面での同時出荷（同じ編成内での競合）が多い"
+        wsOut.Cells(heatTitleRow, heatFirstCol).Font.Bold = True: wsOut.Cells(heatTitleRow, heatFirstCol).Font.Size = 12
+        wsOut.Cells(heatTitleRow, heatFirstCol).HorizontalAlignment = xlLeft
+
+        wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatLabelRow, heatLastCol)).EntireColumn.ColumnWidth = 6
 
         For zi = 1 To 23
-            wsOut.Cells(heatLabelRow, zi).Value = (zi * 2 - 1) & "&" & (zi * 2)
-            wsOut.Cells(heatLabelRow, zi).Font.Size = 8
-            wsOut.Cells(heatLabelRow, zi).HorizontalAlignment = xlCenter
+            Dim heatCol As Long: heatCol = HEAT_COL_OFFSET + zi
+            wsOut.Cells(heatLabelRow, heatCol).Value = (zi * 2 - 1) & "&" & (zi * 2)
+            wsOut.Cells(heatLabelRow, heatCol).Font.Size = 8
+            wsOut.Cells(heatLabelRow, heatCol).HorizontalAlignment = xlCenter
 
-            wsOut.Cells(heatValueRow, zi).Value = zoneCrossHit(zi)
-            wsOut.Cells(heatValueRow, zi).HorizontalAlignment = xlCenter
-            wsOut.Cells(heatValueRow, zi).Font.Bold = True
+            wsOut.Cells(heatValueRow, heatCol).Value = zoneCrossHit(zi)
+            wsOut.Cells(heatValueRow, heatCol).HorizontalAlignment = xlCenter
+            wsOut.Cells(heatValueRow, heatCol).Font.Bold = True
 
             Dim crossRatio As Double
             If maxCross > 0 Then crossRatio = zoneCrossHit(zi) / maxCross Else crossRatio = 0
             Dim gb As Integer: gb = 255 - CInt(155 * crossRatio) ' 0件=白、最大件数=濃い赤
-            wsOut.Cells(heatValueRow, zi).Interior.Color = RGB(255, gb, gb)
+            wsOut.Cells(heatValueRow, heatCol).Interior.Color = RGB(255, gb, gb)
         Next zi
-        wsOut.Range(wsOut.Cells(heatLabelRow, 1), wsOut.Cells(heatValueRow, 23)).Borders.LineStyle = xlContinuous
+        wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatValueRow, heatLastCol)).Borders.LineStyle = xlContinuous
 
         ' KPI記録：AB号機使用比率スコア（号機回数比の目標比率＝理論値 と、実績ファイル集計＝実績値 の近さ）
         Dim abRatioScore As Variant: abRatioScore = ""
