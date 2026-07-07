@@ -24,6 +24,8 @@
     --summer: #fed7aa;
     --trip: #c7d2fe;
     --legal: #c7d2e0;
+    --text-red: #c81e1e;
+    --text-blue: #1d4ed8;
   }
   @media (prefers-color-scheme: dark) {
     :root {
@@ -42,17 +44,21 @@
       --summer: #7c3a10;
       --trip: #312e81;
       --legal: #3b4252;
+      --text-red: #f87171;
+      --text-blue: #60a5fa;
     }
   }
   :root[data-theme="dark"] {
     --bg: #16181d; --panel: #202329; --text: #e8e9eb; --muted: #9aa0a8; --border: #33363d;
     --cell-empty: #2b2e35; --work:#1e3a5f; --off-req:#6b5411; --off-fixed:#3a3d44; --paid:#14532d;
     --absent:#7f1d1d; --adjust:#701a4d; --summer:#7c3a10; --trip:#312e81; --legal:#3b4252;
+    --text-red: #f87171; --text-blue: #60a5fa;
   }
   :root[data-theme="light"] {
     --bg: #f4f5f7; --panel: #ffffff; --text: #1c1e21; --muted: #6b7280; --border: #d7dbe0;
     --cell-empty:#f0f1f3; --work:#dbeafe; --off-req:#fde68a; --off-fixed:#e5e7eb; --paid:#bbf7d0;
     --absent:#fecaca; --adjust:#fbcfe8; --summer:#fed7aa; --trip:#c7d2fe; --legal:#c7d2e0;
+    --text-red: #c81e1e; --text-blue: #1d4ed8;
   }
   * { box-sizing: border-box; }
   body {
@@ -106,10 +112,16 @@
   .daycell.st-夏休 { background: var(--summer); }
   .daycell.st-出張 { background: var(--trip); }
   .daycell.st-法休 { background: var(--legal); }
+  .daycell.st-所休 .dval, .daycell.st-法休 .dval { color: var(--text-red); }
+  .daycell.st-有休 .dval { color: var(--text-blue); }
   .daycell.auto { border-style: dashed; opacity: .75; }
   .daycell .dtag { font-size:9px; color: var(--muted); }
+  .txt-red { color: var(--text-red); }
+  .txt-blue { color: var(--text-blue); }
   .statusbar { display:flex; flex-wrap:wrap; gap:8px; margin:10px 0; }
   .statusbar button { font-weight:600; }
+  .statusbar button.legend-所休, .statusbar button.legend-法休 { color: var(--text-red); }
+  .statusbar button.legend-有休 { color: var(--text-blue); }
   .legend-出勤 { border-left:5px solid #2563eb; }
   .legend-休日 { border-left:5px solid #6b7280; }
   .legend-所休 { border-left:5px solid #ca8a04; }
@@ -592,6 +604,12 @@ function escapeHtml(s) {
   return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
 }
 
+function statusTextColorVar(value) {
+  if (value === '所休' || value === '法休') return 'var(--text-red)';
+  if (value === '有休') return 'var(--text-blue)';
+  return null;
+}
+
 function renderPreview() {
   const table = document.getElementById('previewTable');
   const dates = getDateList();
@@ -602,7 +620,11 @@ function renderPreview() {
     html += `<tr><td class="name">${state.done[name] ? '✔ ' : ''}${escapeHtml(name)}</td>`;
     dates.forEach((d, idx) => {
       const eff = getEffectiveValue(name, idx, d);
-      const style = eff.auto ? ' style="color:var(--muted);font-style:italic;"' : '';
+      const colorVar = statusTextColorVar(eff.value);
+      let styleParts = [];
+      if (eff.auto) styleParts.push('font-style:italic', 'opacity:.75');
+      if (colorVar) styleParts.push('color:' + colorVar);
+      const style = styleParts.length ? ` style="${styleParts.join(';')}"` : '';
       html += `<td${style}>${eff.value}</td>`;
     });
     html += '</tr>';
