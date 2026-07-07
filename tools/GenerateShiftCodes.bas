@@ -6,7 +6,7 @@ Option Explicit
 ' 実行前に「貼付用」シートのA1(年)・B1(月)が正しいことを確認してください。
 '
 ' 休日系の割当:
-'   法休→法休 / 所休→所休 / 有休→有休 / 休日→所休 /
+'   法休→法休 / 所休→所休 / 有休→有休 / 休日→所休 / 休職→休職 /
 '   欠勤→欠勤他 / 調整休→欠調整 / 夏休→夏期休
 '   出張はそれ自体に時刻が記録されていないため、同じ人の前日→翌日の順で
 '   実際の勤務時間が入っている方を借用してコード化します。前後とも
@@ -21,6 +21,7 @@ Private Const WORD_KEKKIN As String = "欠勤"
 Private Const WORD_CHOUSEI As String = "調整休"
 Private Const WORD_NATSUYASUMI As String = "夏休"
 Private Const WORD_SHUCCHOU As String = "出張"
+Private Const WORD_KYUUSHOKU As String = "休職"
 
 Sub GenerateShiftCodes()
     Dim wsPaste As Worksheet, wsSrc As Worksheet, wsMaster As Worksheet
@@ -235,6 +236,8 @@ Private Function ConvertToShiftCode(ByVal rawVal As String, masterDict As Object
             ConvertToShiftCode = "欠調整": Exit Function
         Case WORD_NATSUYASUMI
             ConvertToShiftCode = "夏期休": Exit Function
+        Case WORD_KYUUSHOKU
+            ConvertToShiftCode = "休職": Exit Function
         Case WORD_SHUCCHOU
             ConvertToShiftCode = ""
             Exit Function
