@@ -379,6 +379,54 @@ Sub OptimizeABFormationFlow()
         wsOut.Range("A4:M4").Font.Bold = True
         wsOut.Columns("A:M").AutoFit
 
+        ' 対面同時ヒット状況のヒートマップ（1&2号機～45&46号機の物理配置順に23ゾーンを帯状に表示）
+        Dim zoneCrossHit(1 To 23) As Double
+        Dim pk As Variant, pkParts() As String
+        For Each pk In dictPairs.Keys
+            If dictCrossFace.Exists(pk) Then
+                pkParts = Split(CStr(pk), ",")
+                If dictItemZone.Exists(pkParts(0)) Then
+                    Dim pZone As Integer: pZone = CInt(dictItemZone(pkParts(0)))
+                    If pZone >= 1 And pZone <= 23 Then
+                        zoneCrossHit(pZone) = zoneCrossHit(pZone) + dictPairs(pk)
+                    End If
+                End If
+            End If
+        Next pk
+
+        Dim maxCross As Double: maxCross = 0
+        Dim zi As Integer
+        For zi = 1 To 23
+            If zoneCrossHit(zi) > maxCross Then maxCross = zoneCrossHit(zi)
+        Next zi
+
+        Dim heatTitleRow As Long: heatTitleRow = 4 + outCnt + 3
+        Dim heatLabelRow As Long: heatLabelRow = heatTitleRow + 1
+        Dim heatValueRow As Long: heatValueRow = heatTitleRow + 2
+
+        wsOut.Range(wsOut.Cells(heatTitleRow, 1), wsOut.Cells(heatTitleRow, 23)).Merge
+        wsOut.Cells(heatTitleRow, 1).Value = "【対面同時ヒット状況（ゾーン別ヒートマップ）】　色が濃いほど対面での同時出荷（同じ編成内での競合）が多い"
+        wsOut.Cells(heatTitleRow, 1).Font.Bold = True: wsOut.Cells(heatTitleRow, 1).Font.Size = 12
+        wsOut.Cells(heatTitleRow, 1).HorizontalAlignment = xlLeft
+
+        wsOut.Range(wsOut.Cells(heatLabelRow, 14), wsOut.Cells(heatLabelRow, 23)).EntireColumn.ColumnWidth = 7
+
+        For zi = 1 To 23
+            wsOut.Cells(heatLabelRow, zi).Value = (zi * 2 - 1) & "&" & (zi * 2)
+            wsOut.Cells(heatLabelRow, zi).Font.Size = 8
+            wsOut.Cells(heatLabelRow, zi).HorizontalAlignment = xlCenter
+
+            wsOut.Cells(heatValueRow, zi).Value = zoneCrossHit(zi)
+            wsOut.Cells(heatValueRow, zi).HorizontalAlignment = xlCenter
+            wsOut.Cells(heatValueRow, zi).Font.Bold = True
+
+            Dim crossRatio As Double
+            If maxCross > 0 Then crossRatio = zoneCrossHit(zi) / maxCross Else crossRatio = 0
+            Dim gb As Integer: gb = 255 - CInt(155 * crossRatio) ' 0件=白、最大件数=濃い赤
+            wsOut.Cells(heatValueRow, zi).Interior.Color = RGB(255, gb, gb)
+        Next zi
+        wsOut.Range(wsOut.Cells(heatLabelRow, 1), wsOut.Cells(heatValueRow, 23)).Borders.LineStyle = xlContinuous
+
         ' KPI記録：AB号機使用比率スコア（号機回数比の目標比率＝理論値 と、実績ファイル集計＝実績値 の近さ）
         Dim abRatioScore As Variant: abRatioScore = ""
         Dim wsRatio3 As Worksheet
