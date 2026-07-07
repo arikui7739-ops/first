@@ -113,6 +113,7 @@
     </div>
     <div class="stats-row" id="statsRow" style="display:none;">
       <span class="stat">元データ: <b id="statBLine"></b></span>
+      <span class="stat">バッチNo.: <b id="statBatch"></b></span>
       <span class="stat">オリコン数: <b id="statOrders"></b></span>
       <span class="stat">編成数（6オリコン単位）: <b id="statFormations"></b></span>
       <span class="stat">在庫一覧件数: <b id="statInventory"></b></span>
@@ -246,10 +247,14 @@ function loadOrders(text) {
       inventory.push(...parseGroups(l));
     }
   }
-  return { bLine, orders, inventory };
+
+  // B行は 'B' + 日付8桁 + バッチNo2桁 + ...
+  const batchNo = parseInt(bLine.slice(9, 11), 10);
+
+  return { bLine, batchNo, orders, inventory };
 }
 
-function buildUnitRows(orders) {
+function buildUnitRows(orders, batchNo) {
   const rows = [];
   const formationTotals = new Map(); // formationNo -> {units:Map, other, total, nOrders}
   orders.forEach((o, idx) => {
@@ -263,7 +268,7 @@ function buildUnitRows(orders) {
     }
     let total = other;
     for (const v of counts.values()) total += v;
-    rows.push({ batch:1, sub:1, formationNo, seq, oriconNo:o.oriconNo, counts, other, total });
+    rows.push({ batch:batchNo, sub:1, formationNo, seq, oriconNo:o.oriconNo, counts, other, total });
 
     if (!formationTotals.has(formationNo)) {
       formationTotals.set(formationNo, { units:new Map(), other:0, total:0, nOrders:0 });
@@ -349,7 +354,7 @@ function renderUnitTable(rows) {
   return table;
 }
 
-function renderFormationTable(formationTotals) {
+function renderFormationTable(formationTotals, batchNo) {
   const cols = ['バッチ','サブ','編成順','オリコン数', ...MAIN_UNITS.map(String), '他', '計'];
   const table = document.createElement('table');
   table.className = 'datatable';
@@ -370,7 +375,7 @@ function renderFormationTable(formationTotals) {
   for (const fno of keys) {
     const ft = formationTotals.get(fno);
     const tr = document.createElement('tr');
-    [1, 1, fno, ft.nOrders].forEach(v => {
+    [batchNo, 1, fno, ft.nOrders].forEach(v => {
       const td = document.createElement('td');
       td.textContent = v;
       td.className = 'rowlabel';
@@ -614,10 +619,10 @@ function handleFile(file) {
     try {
       const buf = reader.result;
       const text = new TextDecoder('shift-jis').decode(buf);
-      const { bLine, orders, inventory } = loadOrders(text);
-      const { rows, formationTotals } = buildUnitRows(orders);
+      const { bLine, batchNo, orders, inventory } = loadOrders(text);
+      const { rows, formationTotals } = buildUnitRows(orders, batchNo);
       const cellCounts = buildMapCells(orders);
-      state = { bLine, orders, inventory, rows, formationTotals, cellCounts };
+      state = { bLine, batchNo, orders, inventory, rows, formationTotals, cellCounts };
       renderAll();
     } catch (e) {
       errBox.textContent = '読み込みエラー: ' + e.message;
@@ -633,6 +638,7 @@ function handleFile(file) {
 function renderAll() {
   document.getElementById('statsRow').style.display = 'flex';
   document.getElementById('statBLine').textContent = state.bLine.trim();
+  document.getElementById('statBatch').textContent = state.batchNo;
   document.getElementById('statOrders').textContent = state.orders.length;
   document.getElementById('statFormations').textContent = state.formationTotals.size;
   document.getElementById('statInventory').textContent = state.inventory.length;
@@ -650,7 +656,7 @@ function renderAll() {
   renderCountLegend(document.getElementById('formationLegend'));
   const formationOut = document.getElementById('formationOutput');
   formationOut.innerHTML = '';
-  formationOut.appendChild(renderFormationTable(state.formationTotals));
+  formationOut.appendChild(renderFormationTable(state.formationTotals, state.batchNo));
 
   const invOut = document.getElementById('invOutput');
   invOut.innerHTML = '';
@@ -697,7 +703,7 @@ document.getElementById('formationCsvBtn').addEventListener('click', () => {
   const keys = Array.from(state.formationTotals.keys()).sort((a,b)=>a-b);
   const rows = keys.map(fno => {
     const ft = state.formationTotals.get(fno);
-    return [1, 1, fno, ft.nOrders, ...MAIN_UNITS.map(u => ft.units.get(u) || 0), ft.other, ft.total];
+    return [state.batchNo, 1, fno, ft.nOrders, ...MAIN_UNITS.map(u => ft.units.get(u) || 0), ft.other, ft.total];
   });
   downloadCSV('編成別投入回数.csv', header, rows);
 });
