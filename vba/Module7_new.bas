@@ -77,7 +77,7 @@ Private Function GetKPISheet() As Worksheet
             "AB占有率_理論比率／実績比率：上記スコアの元になった実際の比率（％）。差の大きさを直接確認したいときに使う。|" & _
             "奇数偶数比率スコア(交換前)：Module3のスワップ提案を行う前、実績データそのものの奇数・偶数号機バランス。日々の実態のブレが出る指標。|" & _
             "奇数偶数比率スコア(交換後)：Module3のスワップ提案を反映した場合の見込みバランス。総合スコアはこちらを使用（提案アルゴリズムの性質上、高得点に収束しやすい）。|" & _
-            "対面同時ヒットスコア：対面競合の少なさ。|" & _
+            "対面同時ヒットスコア：対面競合の少なさ。理論上どこまで減らせるかを基準に評価（下記参照）。|" & _
             "Cバラ無駄歩行：Module1実行時に記録する参考指標（暫定正規化）。|" & _
             "総合スコア：下記の計算式による複合スコア。評価：総合スコアに応じた◎/○/×判定。|" & _
             "※予測データを使うModule4・Module5は、実績データのみを評価するというKPIの方針上、この記録の対象外です。|"
@@ -96,7 +96,8 @@ Private Function GetKPISheet() As Worksheet
             "　実績値：AB間口(1～46号機、6～14列は除く)の実績回数合計 ÷ 全アイテムの回数合計|" & _
             "奇数偶数比率スコア(交換前/交換後共通の式) = 100×(1－｜奇数合計－偶数合計｜÷(奇数合計+偶数合計))|" & _
             "　交換前：Module3がスワップ提案を作る前の実績ヒット数で計算。交換後：提案どおりに交換した場合の見込みヒット数で計算。|" & _
-            "対面同時ヒットスコア = 100×(1－対面ペア数÷全ペア数)|" & _
+            "対面同時ヒットスコア = 100×理論最小対面ヒット数÷実績対面ヒット数（100が上限）|" & _
+            "　理論最小対面ヒット数：ゾーンごとに今の奇数側/偶数側の個数を保ったまま最適配置し直した場合に達成できる対面ヒット数の最小値(局所探索で算出)|" & _
             "Cバラ無駄歩行 = 100－min(100, 平均無駄歩行スコア÷20×100)　【暫定式】|" & _
             "|" & _
             "■ 評価の目安|" & _
@@ -207,7 +208,8 @@ End Sub
 ' --- 各モジュールから呼び出す記録用プロシージャ ---
 
 ' Module3から: AB号機使用比率・AB占有率(スコア＋理論比率／実績比率)・奇数偶数比率(交換前/交換後)・対面同時ヒットスコア・実績日
-Public Sub LogFormationScore(ByVal oddTotalStart As Double, ByVal evenTotalStart As Double, ByVal oddTotal As Double, ByVal evenTotal As Double, ByVal crossFaceCount As Long, ByVal totalPairCount As Long, ByVal abRatioScore As Variant, ByVal abOccupancyScore As Variant, ByVal abTheoreticalRatio As Variant, ByVal abActualRatio As Variant, ByVal actualDate As Date)
+' ※対面同時ヒットスコアはModule3側で「理論最小対面ヒット数÷実績対面ヒット数」として計算済みの値を受け取るだけ
+Public Sub LogFormationScore(ByVal oddTotalStart As Double, ByVal evenTotalStart As Double, ByVal oddTotal As Double, ByVal evenTotal As Double, ByVal crossFaceScore As Variant, ByVal abRatioScore As Variant, ByVal abOccupancyScore As Variant, ByVal abTheoreticalRatio As Variant, ByVal abActualRatio As Variant, ByVal actualDate As Date)
     Dim r As Long: r = GetRowForDate(actualDate)
     Dim ws As Worksheet: Set ws = GetKPISheet()
 
@@ -225,20 +227,13 @@ Public Sub LogFormationScore(ByVal oddTotalStart As Double, ByVal evenTotalStart
         balanceScore = 100
     End If
 
-    Dim crossFaceScore As Double
-    If totalPairCount > 0 Then
-        crossFaceScore = 100 * (1 - crossFaceCount / totalPairCount)
-    Else
-        crossFaceScore = 100
-    End If
-
     If IsNumeric(abRatioScore) Then ws.Cells(r, 3).Value = abRatioScore
     If IsNumeric(abOccupancyScore) Then ws.Cells(r, 4).Value = abOccupancyScore
     If IsNumeric(abTheoreticalRatio) Then ws.Cells(r, 5).Value = abTheoreticalRatio
     If IsNumeric(abActualRatio) Then ws.Cells(r, 6).Value = abActualRatio
     ws.Cells(r, 7).Value = preBalanceScore
     ws.Cells(r, 8).Value = balanceScore
-    ws.Cells(r, 9).Value = crossFaceScore
+    If IsNumeric(crossFaceScore) Then ws.Cells(r, 9).Value = crossFaceScore
     RecalcRow r
 End Sub
 

@@ -543,7 +543,40 @@ Sub OptimizeABFormationFlow()
             End If
         End If
 
-        ' KPI記録：奇数偶数比率スコア・対面同時ヒットスコア・実績日（B行の日付があれば優先、無ければファイル更新日時）
+        ' KPI記録：対面同時ヒットスコア（ゾーンごとに現状の奇数/偶数の個数を保ったまま最適配置し直した場合の
+        ' 「理論最小対面ヒット数」に対して、実績の対面ヒット数がどれだけ近いかで評価する）
+        Dim actualCrossFaceHits As Double: actualCrossFaceHits = 0
+        Dim theoreticalMinCrossFace As Double: theoreticalMinCrossFace = 0
+        Dim zoneItemsDict As Object: Set zoneItemsDict = CreateObject("Scripting.Dictionary") ' zone -> Dictionary(item->1)
+        Dim zoneWeightDict As Object: Set zoneWeightDict = CreateObject("Scripting.Dictionary") ' zone -> Dictionary(pairKey->weight)
+        Dim pk3 As Variant, pkParts3() As String
+        For Each pk3 In dictPairs.Keys
+            pkParts3 = Split(CStr(pk3), ",")
+            If dictItemZone.Exists(pkParts3(0)) Then
+                Dim zz3 As Integer: zz3 = dictItemZone(pkParts3(0))
+                If Not zoneItemsDict.Exists(zz3) Then Set zoneItemsDict(zz3) = CreateObject("Scripting.Dictionary")
+                zoneItemsDict(zz3)(pkParts3(0)) = 1
+                zoneItemsDict(zz3)(pkParts3(1)) = 1
+                If Not zoneWeightDict.Exists(zz3) Then Set zoneWeightDict(zz3) = CreateObject("Scripting.Dictionary")
+                zoneWeightDict(zz3)(CStr(pk3)) = dictPairs(pk3)
+                If dictCrossFace.Exists(pk3) Then actualCrossFaceHits = actualCrossFaceHits + dictPairs(pk3)
+            End If
+        Next pk3
+
+        Dim zoneKeyMC As Variant
+        For Each zoneKeyMC In zoneItemsDict.Keys
+            Dim zItemsArr() As Variant: zItemsArr = zoneItemsDict(zoneKeyMC).Keys
+            theoreticalMinCrossFace = theoreticalMinCrossFace + ComputeZoneMinCut(zItemsArr, dictItemMach, zoneWeightDict(zoneKeyMC))
+        Next zoneKeyMC
+
+        Dim crossFaceScore As Variant: crossFaceScore = ""
+        If actualCrossFaceHits > 0 Then
+            crossFaceScore = Application.WorksheetFunction.Min(100, 100 * theoreticalMinCrossFace / actualCrossFaceHits)
+        Else
+            crossFaceScore = 100
+        End If
+
+        ' KPI記録：奇数偶数比率スコア・実績日（B行の日付があれば優先、無ければファイル更新日時）
         Dim reportDate As Date
         If latestBDate > DateSerial(1900, 1, 1) Then
             reportDate = latestBDate
@@ -551,7 +584,7 @@ Sub OptimizeABFormationFlow()
             reportDate = DateSerial(Year(latestFileDate), Month(latestFileDate), Day(latestFileDate))
         End If
         On Error Resume Next
-        Module7.LogFormationScore oddTotalStart, evenTotalStart, oddTotal, evenTotal, dictCrossFace.Count, dictPairs.Count, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
+        Module7.LogFormationScore oddTotalStart, evenTotalStart, oddTotal, evenTotal, crossFaceScore, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
         On Error GoTo 0
 
         MsgBox "「AB編成流れ最適化」の作成が完了しました。（" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の交換候補）" & vbCrLf & _
@@ -592,6 +625,114 @@ Sub RecordZonePairs(currentItems As Object, dictPairs As Object, dictCrossFace A
         Next j
     Next i
 End Sub
+
+' 1つのゾーン内で、現状の奇数側・偶数側の個数を保ったまま最適配置し直した場合の
+' 「理論最小対面ヒット数」を局所探索（Kernighan-Lin風の2分割）で求める。
+' itemsArr: このゾーンに属するアイテムキーの配列／dictMach: アイテム→号機／weightDict: "item1,item2"(ソート済)→編成内共起回数
+Function ComputeZoneMinCut(itemsArr() As Variant, dictMach As Object, weightDict As Object) As Double
+    Dim n As Long: n = UBound(itemsArr) - LBound(itemsArr) + 1
+    If n <= 1 Then ComputeZoneMinCut = 0: Exit Function
+
+    Dim lo As Long: lo = LBound(itemsArr)
+    Dim hi As Long: hi = UBound(itemsArr)
+    Dim i As Long, j As Long, k As Long
+
+    ' 重み参照を高速化するため、隣接リストを事前構築
+    Dim adjKeys() As String, adjVals() As Double, adjCount() As Long
+    ReDim adjCount(lo To hi)
+    Dim maxAdj As Long: maxAdj = n
+    ReDim adjKeys(lo To hi, 0 To maxAdj - 1)
+    ReDim adjVals(lo To hi, 0 To maxAdj - 1)
+    For i = lo To hi
+        adjCount(i) = 0
+    Next i
+    For i = lo To hi - 1
+        For j = i + 1 To hi
+            Dim wKey As String
+            If itemsArr(i) < itemsArr(j) Then wKey = itemsArr(i) & "," & itemsArr(j) Else wKey = itemsArr(j) & "," & itemsArr(i)
+            If weightDict.Exists(wKey) Then
+                Dim wVal As Double: wVal = weightDict(wKey)
+                adjKeys(i, adjCount(i)) = CStr(j): adjVals(i, adjCount(i)) = wVal: adjCount(i) = adjCount(i) + 1
+                adjKeys(j, adjCount(j)) = CStr(i): adjVals(j, adjCount(j)) = wVal: adjCount(j) = adjCount(j) + 1
+            End If
+        Next j
+    Next i
+
+    Dim nSide1 As Long: nSide1 = 0
+    For i = lo To hi
+        If dictMach(itemsArr(i)) Mod 2 = 1 Then nSide1 = nSide1 + 1
+    Next i
+
+    Randomize
+    Dim bestCut As Double: bestCut = -1
+    Dim restartIdx As Long
+    For restartIdx = 1 To 4 ' 1回目=現状の配置、2～4回目=ランダム配置から局所探索
+        Dim assign() As Integer: ReDim assign(lo To hi)
+        If restartIdx = 1 Then
+            For i = lo To hi
+                assign(i) = IIf(dictMach(itemsArr(i)) Mod 2 = 1, 1, 0)
+            Next i
+        Else
+            Dim order() As Long: ReDim order(lo To hi)
+            For i = lo To hi: order(i) = i: Next i
+            For i = hi To lo + 1 Step -1
+                Dim rIdx As Long: rIdx = Int(Rnd() * (i - lo + 1)) + lo
+                Dim tmp As Long: tmp = order(i): order(i) = order(rIdx): order(rIdx) = tmp
+            Next i
+            For i = lo To hi
+                assign(order(i)) = IIf((i - lo) < nSide1, 1, 0)
+            Next i
+        End If
+
+        Dim curCut As Double: curCut = 0
+        For i = lo To hi
+            For k = 0 To adjCount(i) - 1
+                j = CLng(adjKeys(i, k))
+                If j > i Then
+                    If assign(i) <> assign(j) Then curCut = curCut + adjVals(i, k)
+                End If
+            Next k
+        Next i
+
+        Dim improved As Boolean: improved = True
+        Do While improved
+            improved = False
+            For i = lo To hi - 1
+                For j = i + 1 To hi
+                    If assign(i) <> assign(j) Then
+                        Dim delta As Double: delta = 0
+                        For k = 0 To adjCount(i) - 1
+                            Dim nb As Long: nb = CLng(adjKeys(i, k))
+                            If nb <> j Then
+                                Dim oldV As Integer, newV As Integer
+                                oldV = IIf(assign(i) <> assign(nb), 1, 0)
+                                newV = IIf(assign(j) <> assign(nb), 1, 0)
+                                delta = delta + (newV - oldV) * adjVals(i, k)
+                            End If
+                        Next k
+                        For k = 0 To adjCount(j) - 1
+                            nb = CLng(adjKeys(j, k))
+                            If nb <> i Then
+                                oldV = IIf(assign(j) <> assign(nb), 1, 0)
+                                newV = IIf(assign(i) <> assign(nb), 1, 0)
+                                delta = delta + (newV - oldV) * adjVals(j, k)
+                            End If
+                        Next k
+                        If delta < -0.0001 Then
+                            Dim tmpA As Integer: tmpA = assign(i): assign(i) = assign(j): assign(j) = tmpA
+                            curCut = curCut + delta
+                            improved = True
+                        End If
+                    End If
+                Next j
+            Next i
+        Loop
+
+        If bestCut < 0 Or curCut < bestCut Then bestCut = curCut
+    Next restartIdx
+
+    ComputeZoneMinCut = bestCut
+End Function
 
 ' 1～4号機はサイズが異なるアイテムを格納しているため対象から除外する
 Function IsExcludedSlot3(mach As Integer, col As Integer) As Boolean
