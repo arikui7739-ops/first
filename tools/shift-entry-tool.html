@@ -588,6 +588,10 @@ function copyAll() {
   copyTextToClipboard(lines.join('\n'));
 }
 
+function escapeHtml(s) {
+  return String(s).replace(/&/g,'&amp;').replace(/</g,'&lt;').replace(/>/g,'&gt;').replace(/"/g,'&quot;');
+}
+
 function renderPreview() {
   const table = document.getElementById('previewTable');
   const dates = getDateList();
@@ -595,7 +599,7 @@ function renderPreview() {
   dates.forEach(d => html += `<th>${fmtMD(d)}<br>(${WEEKDAYS[d.getDay()]})</th>`);
   html += '</tr></thead><tbody>';
   state.staff.forEach(name => {
-    html += `<tr><td class="name">${state.done[name] ? '✔ ' : ''}${name}</td>`;
+    html += `<tr><td class="name">${state.done[name] ? '✔ ' : ''}${escapeHtml(name)}</td>`;
     dates.forEach((d, idx) => {
       const eff = getEffectiveValue(name, idx, d);
       const style = eff.auto ? ' style="color:var(--muted);font-style:italic;"' : '';
