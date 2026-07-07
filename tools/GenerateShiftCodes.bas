@@ -8,8 +8,10 @@ Option Explicit
 ' 休日系の割当:
 '   法休→法休 / 所休→所休 / 有休→有休 / 休日→所休 /
 '   欠勤→欠勤他 / 調整休→欠調整 / 夏休→夏期休
-'   出張は時刻が記録されていないため変換できず、実行後の一覧に
-'   "要確認" として表示されます（時刻を入力すれば自動変換されます）。
+'   出張はそれ自体に時刻が記録されていないため、同じ人の前日→翌日の順で
+'   実際の勤務時間が入っている方を借用してコード化します。前後とも
+'   勤務時間が無い場合や、前後の時間が食い違う場合のみ実行後の一覧に
+'   "要確認" として表示されます。
 
 Private Const WORD_HOUJYUU As String = "法休"
 Private Const WORD_SHOKYUU As String = "所休"
@@ -145,6 +147,19 @@ Sub GenerateShiftCodes()
             If Trim(rawVal & "") = "" Then GoTo NextDay
 
             code = ConvertToShiftCode(CStr(rawVal), masterDict)
+
+            If code = "" And Trim(CStr(rawVal)) = WORD_SHUCCHOU Then
+                code = InferShuchoCode(wsSrc, foundNameCell.Row, colMap, c, pasteFirstCol, pasteLastCol, masterDict)
+                If code = "AMBIGUOUS" Then
+                    code = ""
+                    unresolvedCount = unresolvedCount + 1
+                    If unresolvedCount <= 30 Then
+                        unresolved = unresolved & empName & " " & wsPaste.Cells(1, c).Value & "日: " & rawVal & "（前後で勤務時間が食い違うため要確認）" & vbCrLf
+                    End If
+                    GoTo NextDay
+                End If
+            End If
+
             If code = "" Then
                 unresolvedCount = unresolvedCount + 1
                 If unresolvedCount <= 30 Then
@@ -225,9 +240,15 @@ Private Function ConvertToShiftCode(ByVal rawVal As String, masterDict As Object
             Exit Function
     End Select
 
+    ConvertToShiftCode = TimeRangeToCode(v, masterDict)
+End Function
+
+' 「休日」等の言葉ではなく、実際の勤務時間の文字列だった場合にのみ
+' コードを返す。言葉（休日など）や解析できない文字列には "" を返す。
+Private Function TimeRangeToCode(ByVal rawVal As String, masterDict As Object) As String
     Dim startH As Long, startM As Long, endH As Long, endM As Long
-    If Not ParseTimeRange(v, startH, startM, endH, endM) Then
-        ConvertToShiftCode = ""
+    If Not ParseTimeRange(Trim(rawVal), startH, startM, endH, endM) Then
+        TimeRangeToCode = ""
         Exit Function
     End If
 
@@ -239,9 +260,45 @@ Private Function ConvertToShiftCode(ByVal rawVal As String, masterDict As Object
     key = TimeKey(startSerial) & "|" & TimeKey(endSerial)
 
     If masterDict.Exists(key) Then
-        ConvertToShiftCode = masterDict(key)
+        TimeRangeToCode = masterDict(key)
     Else
-        ConvertToShiftCode = ""
+        TimeRangeToCode = ""
+    End If
+End Function
+
+' 出張の日を、同じ人の前日→翌日の順で実際の勤務時間から推定する。
+' 前後とも勤務時間が取れなければ ""、前後で異なる時間なら "AMBIGUOUS" を返す。
+Private Function InferShuchoCode(wsSrc As Worksheet, srcRow As Long, colMap() As Long, _
+                                  c As Long, pasteFirstCol As Long, pasteLastCol As Long, _
+                                  masterDict As Object) As String
+    Dim prevCode As String, nextCode As String
+
+    prevCode = ""
+    If c - 1 >= pasteFirstCol Then
+        If colMap(c - 1) <> 0 Then
+            prevCode = TimeRangeToCode(CStr(wsSrc.Cells(srcRow, colMap(c - 1)).Value), masterDict)
+        End If
+    End If
+
+    nextCode = ""
+    If c + 1 <= pasteLastCol Then
+        If colMap(c + 1) <> 0 Then
+            nextCode = TimeRangeToCode(CStr(wsSrc.Cells(srcRow, colMap(c + 1)).Value), masterDict)
+        End If
+    End If
+
+    If prevCode <> "" And nextCode <> "" Then
+        If prevCode = nextCode Then
+            InferShuchoCode = prevCode
+        Else
+            InferShuchoCode = "AMBIGUOUS"
+        End If
+    ElseIf prevCode <> "" Then
+        InferShuchoCode = prevCode
+    ElseIf nextCode <> "" Then
+        InferShuchoCode = nextCode
+    Else
+        InferShuchoCode = ""
     End If
 End Function
 
