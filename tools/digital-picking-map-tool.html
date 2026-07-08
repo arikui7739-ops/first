@@ -200,15 +200,33 @@ function mapColor(v) {
   return null;
 }
 
+// Two known S71 export layouts have been seen for E (pick detail) lines:
+//  - 46 chars/line: up to 3 packed (ロケーション6桁+本数3桁) groups per line
+//  - 50 chars/line: exactly 1 (ロケーション6桁+...) group per line, padded with zeros
+// ロケーション(号-面-段, 2+2+2桁) starts right after 'E' in both layouts; only the
+// packing differs. 本数(qty) in the 50-char layout is not reliably decodable and is
+// unused downstream (回数マップ/集計はすべて「出現回数」ベースで、本数の値は使っていない)。
 function parseGroups(line) {
   const body = line.slice(1);
   const out = [];
-  for (let i = 0; i < body.length; i += 13) {
-    const g = body.slice(i, i + 13).slice(0, 9);
-    if (g.trim() === '') continue;
-    const loc = g.slice(0, 6);
-    const qty = g.slice(6, 9);
-    out.push([parseInt(loc.slice(0,2),10), parseInt(loc.slice(2,4),10), parseInt(loc.slice(4,6),10), parseInt(qty,10)]);
+  if (body.length <= 45) {
+    // 46-char layout: 3 groups packed into 13-char slots
+    for (let i = 0; i < body.length; i += 13) {
+      const g = body.slice(i, i + 13).slice(0, 9);
+      if (g.trim() === '') continue;
+      const loc = g.slice(0, 6);
+      const qty = g.slice(6, 9);
+      out.push([parseInt(loc.slice(0,2),10), parseInt(loc.slice(2,4),10), parseInt(loc.slice(4,6),10), parseInt(qty,10) || 0]);
+    }
+  } else if (body.length >= 48) {
+    // 50-char layout: single ロケーション per line, rest is zero-padded filler
+    const loc = body.slice(0, 6);
+    if (loc.trim() !== '') {
+      const qty = parseInt(body.slice(6, 11), 10) || 0;
+      out.push([parseInt(loc.slice(0,2),10), parseInt(loc.slice(2,4),10), parseInt(loc.slice(4,6),10), qty]);
+    }
+  } else {
+    throw new Error(`未対応のレコード長です（${line.length}文字）。フォーマットが変わっている可能性があります。`);
   }
   return out;
 }
@@ -216,8 +234,12 @@ function parseGroups(line) {
 function loadOrders(text) {
   const lines = text.split('\r\n').filter(l => l.length > 0);
   if (lines.length === 0) throw new Error('データが空です');
-  const bLine = lines[0];
-  const recs = lines.slice(1);
+  // Bレコード（拠点・日付・バッチNo.）より前に別レコード（Aレコード等）が付くファイルもあるため、
+  // 先頭固定ではなく最初に現れる'B'始まりの行を探す。
+  const bIdx = lines.findIndex(l => l.startsWith('B'));
+  if (bIdx === -1) throw new Error('Bレコード（拠点・日付ヘッダー）が見つかりません');
+  const bLine = lines[bIdx];
+  const recs = lines.slice(bIdx + 1);
 
   let lastHIdx = -1;
   for (let i = 0; i < recs.length; i++) {
