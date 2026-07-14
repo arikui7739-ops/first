@@ -214,6 +214,13 @@ const ZONES = (() => {
 const ZONE_OF_UNIT = new Map();
 for (const z of ZONES) for (const u of z.units) ZONE_OF_UNIT.set(u, z.zoneNo);
 
+// 編成別投入回数（ゾーン別）表示専用のゾーン見出し表記（24→50, 25→60）
+function zoneDisplayLabel(zoneNo) {
+  if (zoneNo === 24) return '50';
+  if (zoneNo === 25) return '60';
+  return String(zoneNo);
+}
+
 // count gradient for 号機別ピッキング回数 / 編成別投入回数: 1=薄い青 -> 6+=濃い青
 const COUNT_LOW = [0xDD, 0xEB, 0xF7];
 const COUNT_HIGH = [0x1F, 0x4E, 0x79];
@@ -523,7 +530,7 @@ function renderFormationTable(formationTotals, batchNo) {
 }
 
 function renderFormationZoneTable(formationZoneTotals, batchNo) {
-  const cols = ['バッチ','サブ','編成順','オリコン数', ...ZONES.map(z => String(z.zoneNo)), '他', '計'];
+  const cols = ['バッチ','サブ','編成順','オリコン数', ...ZONES.map(z => zoneDisplayLabel(z.zoneNo)), 'X', '計'];
   const table = document.createElement('table');
   table.className = 'datatable';
   const thead = document.createElement('thead');
@@ -968,7 +975,7 @@ document.getElementById('formationCsvBtn').addEventListener('click', () => {
 });
 
 document.getElementById('formationZoneCsvBtn').addEventListener('click', () => {
-  const header = ['バッチ','サブ','編成順','オリコン数', ...ZONES.map(z => String(z.zoneNo)), '他', '計'];
+  const header = ['バッチ','サブ','編成順','オリコン数', ...ZONES.map(z => zoneDisplayLabel(z.zoneNo)), 'X', '計'];
   const keys = Array.from(state.formationZoneTotals.keys()).sort((a,b)=>a-b);
   const rows = keys.map(fno => {
     const ft = state.formationZoneTotals.get(fno);
