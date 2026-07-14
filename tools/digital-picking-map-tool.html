@@ -1,0 +1,866 @@
+<!doctype html>
+<html lang="ja">
+<head>
+<meta charset="utf-8">
+<title>デジタルピッキング 出荷回数マップ ツール</title>
+<style>
+  :root {
+    --bg: #f4f5f7;
+    --panel: #ffffff;
+    --text: #1c1e21;
+    --muted: #6b7280;
+    --border: #d7dbe0;
+    --accent: #2563eb;
+    --accent-text: #ffffff;
+    --header-bg: #eaf1fb;
+    --subtotal-bg: #f2f2f2;
+  }
+  @media (prefers-color-scheme: dark) {
+    :root {
+      --bg: #16181d;
+      --panel: #202329;
+      --text: #e8e9eb;
+      --muted: #9aa0a8;
+      --border: #33363d;
+      --header-bg: #1d2a3d;
+      --subtotal-bg: #2a2d33;
+    }
+  }
+  :root[data-theme="dark"] {
+    --bg: #16181d; --panel: #202329; --text: #e8e9eb; --muted: #9aa0a8; --border: #33363d;
+    --header-bg: #1d2a3d; --subtotal-bg: #2a2d33;
+  }
+  :root[data-theme="light"] {
+    --bg: #f4f5f7; --panel: #ffffff; --text: #1c1e21; --muted: #6b7280; --border: #d7dbe0;
+    --header-bg: #eaf1fb; --subtotal-bg: #f2f2f2;
+  }
+  * { box-sizing: border-box; }
+  body {
+    margin: 0; padding: 16px; background: var(--bg); color: var(--text);
+    font-family: "Segoe UI", "Hiragino Kaku Gothic ProN", "Yu Gothic", sans-serif;
+    font-size: 14px;
+  }
+  h1 { font-size: 18px; margin: 0 0 4px; }
+  .sub { color: var(--muted); margin: 0 0 16px; font-size: 13px; line-height:1.6; }
+  .panel {
+    background: var(--panel); border: 1px solid var(--border); border-radius: 10px;
+    padding: 14px 16px; margin-bottom: 14px;
+  }
+  .panel h2 { font-size: 14px; margin: 0 0 10px; display:flex; align-items:center; gap:8px; cursor:pointer; user-select:none;}
+  .panel h2 .arrow { transition: transform .15s; font-size: 11px; }
+  .panel.collapsed .body { display:none; }
+  .panel.collapsed h2 .arrow { transform: rotate(-90deg); }
+  .row { display:flex; gap:10px; flex-wrap:wrap; align-items:center; margin-bottom:10px; }
+  label { color: var(--muted); font-size: 12px; margin-right:4px; }
+  button {
+    border:1px solid var(--border); background: var(--panel); color:var(--text);
+    border-radius:8px; padding:7px 12px; font-size:13px; cursor:pointer;
+  }
+  button:hover { border-color: var(--accent); }
+  button.primary { background: var(--accent); color: var(--accent-text); border-color: var(--accent); }
+  button:disabled { opacity:.4; cursor:not-allowed; }
+  .hint { color: var(--muted); font-size:12px; line-height:1.6; }
+  .stat { color: var(--muted); font-size:12px; }
+  .stats-row { display:flex; gap:18px; flex-wrap:wrap; margin-top:6px; }
+  .stats-row b { color: var(--text); }
+  .legend { display:flex; flex-wrap:wrap; gap:10px; margin: 8px 0 4px; font-size:12px; color:var(--muted); align-items:center; }
+  .legend .swatch { display:inline-block; min-width:32px; padding:1px 6px; border-radius:4px; text-align:center; border:1px solid var(--border); font-size:11px; }
+
+  .gridwrap { overflow:auto; max-height: 560px; border:1px solid var(--border); border-radius:8px; }
+  table.datatable { border-collapse:collapse; font-size:11px; }
+  table.datatable th, table.datatable td {
+    border:1px solid var(--border); padding:2px 4px; text-align:center; white-space:nowrap;
+  }
+  table.datatable thead th { background: var(--header-bg); position:sticky; top:0; z-index:2; }
+  table.datatable td.rowlabel, table.datatable th.rowlabel {
+    position:sticky; left:0; background:var(--panel); z-index:1; font-weight:600;
+  }
+  table.datatable thead th.rowlabel { z-index:3; }
+  table.datatable tr.total td { background: var(--subtotal-bg); font-weight:bold; }
+
+  table.mapgrid { border-collapse:collapse; font-size:11px; margin-top:6px; }
+  table.mapgrid th, table.mapgrid td {
+    border:1px solid var(--border); width:26px; height:22px; text-align:center; padding:0;
+  }
+  table.mapgrid thead th { background: var(--header-bg); font-weight:bold; }
+  table.mapgrid td.rowlabel, table.mapgrid th.collabel { background: var(--subtotal-bg); font-weight:bold; width:34px; }
+  table.mapgrid td.gap, table.mapgrid th.gap { border:none; width:6px; background:transparent; }
+  table.mapgrid td.unitedge-l { border-left:2px solid #808080; }
+  table.mapgrid td.unitedge-r { border-right:2px solid #808080; }
+  table.mapgrid tr.subtotal td { font-weight:bold; background: var(--subtotal-bg); }
+  table.mapgrid td.wide, table.mapgrid th.wide { width:46px; }
+
+  .mapwrap { overflow:auto; }
+  .filebox { display:flex; flex-direction:column; gap:8px; align-items:flex-start; }
+  #fileInput { font-size:13px; }
+  .error { color:#dc2626; font-size:13px; }
+</style>
+</head>
+<body>
+
+<h1>デジタルピッキング 出荷回数マップ ツール（石狩LC）</h1>
+<p class="sub">
+  S7バラピッキング実績データ（固定長テキスト、Shift-JIS）を読み込み、号機別ピッキング回数・編成別投入回数・Cバラマップ（号-段-列のヒートマップ）を自動生成します。
+  ファイルの末尾に含まれる「出荷済ロケーション在庫一覧」は出荷回数の集計には含めず、別表として表示します。
+</p>
+
+<div class="panel" id="uploadPanel">
+  <h2 onclick="togglePanel('uploadPanel')"><span class="arrow">▼</span> 1. データ読み込み</h2>
+  <div class="body">
+    <div class="filebox">
+      <input type="file" id="fileInput">
+      <div class="hint">S7バラピッキングデータ（B/H/Eレコードの固定長テキスト）を選択してください。Shift-JISとして読み込みます。</div>
+      <div id="loadError" class="error"></div>
+    </div>
+    <div class="stats-row" id="statsRow" style="display:none;">
+      <span class="stat">元データ: <b id="statBLine"></b></span>
+      <span class="stat">バッチNo.: <b id="statBatch"></b></span>
+      <span class="stat">オリコン数: <b id="statOrders"></b></span>
+      <span class="stat">編成数（6オリコン単位）: <b id="statFormations"></b></span>
+      <span class="stat">在庫一覧件数: <b id="statInventory"></b></span>
+    </div>
+  </div>
+</div>
+
+<div class="panel" id="mapPanel">
+  <h2 onclick="togglePanel('mapPanel')"><span class="arrow">▼</span> 2. 石狩Cバラマップ（号-段-列）</h2>
+  <div class="body">
+    <div class="row">
+      <span class="hint">号: 68→61, 58→51（59・60は欠番）／列: 1〜4／段: 1〜9。セルの値は出荷回数。</span>
+      <button id="mapCsvBtn" disabled>CSVダウンロード</button>
+    </div>
+    <div class="legend" id="mapLegend"></div>
+    <div class="mapwrap" id="mapOutput"></div>
+  </div>
+</div>
+
+<div class="panel" id="zonePanel">
+  <h2 onclick="togglePanel('zonePanel')"><span class="arrow">▼</span> 3. ゾーン別 回数ヒートマップ</h2>
+  <div class="body">
+    <div class="row">
+      <span class="hint">ゾーン分け: 1〜46号機は2台単位（1,2号機→1ゾーン、3,4号機→2ゾーン…45,46号機→23ゾーン）、51〜58号機で24ゾーン、61〜68号機で25ゾーン（59・60は欠番）。セルの値はゾーン内合計の出荷回数。</span>
+      <button id="zoneCsvBtn" disabled>CSVダウンロード</button>
+    </div>
+    <div class="legend" id="zoneLegend"></div>
+    <div class="mapwrap" id="zoneOutput"></div>
+  </div>
+</div>
+
+<div class="panel" id="unitPanel">
+  <h2 onclick="togglePanel('unitPanel')"><span class="arrow">▼</span> 4. 号機別ピッキング回数（オリコン別）</h2>
+  <div class="body">
+    <div class="row">
+      <span class="hint">バッチ・サブ・編成順・流し順・オリコンNo＋号機1〜46＋他＋計。1行＝1オリコン。</span>
+      <button id="unitCsvBtn" disabled>CSVダウンロード</button>
+    </div>
+    <div class="legend" id="unitLegend"></div>
+    <div class="gridwrap" id="unitOutput"></div>
+  </div>
+</div>
+
+<div class="panel" id="formationPanel">
+  <h2 onclick="togglePanel('formationPanel')"><span class="arrow">▼</span> 5. 編成別投入回数</h2>
+  <div class="body">
+    <div class="row">
+      <span class="hint">編成 = 先頭オリコンから6オリコン単位で区切って集計。</span>
+      <button id="formationCsvBtn" disabled>CSVダウンロード</button>
+    </div>
+    <div class="legend" id="formationLegend"></div>
+    <div class="gridwrap" id="formationOutput"></div>
+  </div>
+</div>
+
+<div class="panel collapsed" id="inventoryPanel">
+  <h2 onclick="togglePanel('inventoryPanel')"><span class="arrow">▼</span> 6. 出荷済ロケーション在庫一覧（参考・集計対象外）</h2>
+  <div class="body">
+    <div class="row">
+      <span class="hint">ファイル末尾のブロック。出荷回数マップ・回数集計には含めていません。</span>
+      <button id="invCsvBtn" disabled>CSVダウンロード</button>
+    </div>
+    <div class="gridwrap" id="invOutput"></div>
+  </div>
+</div>
+
+<script>
+const MAIN_UNITS = Array.from({length:46}, (_,i)=>i+1); // 1-46
+const C_ZONE_UNITS = [68,67,66,65,64,63,62,61, 58,57,56,55,54,53,52,51]; // 68(左)...61, 58...51(右), 59/60欠番
+const FORMATION_SIZE = 6;
+const MAP_MAX_POS = 9;
+
+// ピッキングゾーン: 1〜46号機は2台単位で1ゾーン（1,2号機→1ゾーン…45,46号機→23ゾーン）、
+// 51〜58号機で24ゾーン、61〜68号機で25ゾーン（59・60は欠番）としてまとめる。
+const ZONES = (() => {
+  const zones = [];
+  for (let i = 0; i < 23; i++) {
+    const a = 2 * i + 1, b = 2 * i + 2;
+    zones.push({ zoneNo: i + 1, units: [a, b], label: `${a},${b}号機` });
+  }
+  zones.push({ zoneNo: 24, units: [51,52,53,54,55,56,57,58], label: '51-58号機' });
+  zones.push({ zoneNo: 25, units: [61,62,63,64,65,66,67,68], label: '61-68号機' });
+  return zones;
+})();
+
+// count gradient for 号機別ピッキング回数 / 編成別投入回数: 1=薄い青 -> 6+=濃い青
+const COUNT_LOW = [0xDD, 0xEB, 0xF7];
+const COUNT_HIGH = [0x1F, 0x4E, 0x79];
+function countColor(v) {
+  if (!v || v <= 0) return null;
+  const t = (Math.min(v, 6) - 1) / 5;
+  const r = Math.round(COUNT_LOW[0] + (COUNT_HIGH[0]-COUNT_LOW[0])*t);
+  const g = Math.round(COUNT_LOW[1] + (COUNT_HIGH[1]-COUNT_LOW[1])*t);
+  const b = Math.round(COUNT_LOW[2] + (COUNT_HIGH[2]-COUNT_LOW[2])*t);
+  const hex = c => c.toString(16).padStart(2,'0');
+  return { bg: `#${hex(r)}${hex(g)}${hex(b)}`, fg: v >= 4 ? '#ffffff' : null };
+}
+
+// band colors for the Cバラマップ / ゾーン別ヒートマップ (matches the Excel workbook's legend)
+const MAP_BANDS = [
+  {lo:0, hi:0, color:null, label:'0回'},
+  {lo:1, hi:3, color:'#C6EFCE', label:'1-3回'},
+  {lo:4, hi:6, color:'#FFEB9C', label:'4-6回'},
+  {lo:7, hi:9, color:'#FFC7A0', label:'7-9回'},
+  {lo:10, hi:Infinity, color:'#FFC7CE', label:'10回以上'},
+];
+function mapColor(v) {
+  for (const b of MAP_BANDS) if (v >= b.lo && v <= b.hi) return b.color;
+  return null;
+}
+
+// Two known S71 export layouts have been seen for E (pick detail) lines:
+//  - 46 chars/line: up to 3 packed (ロケーション6桁+本数3桁) groups per line
+//  - 50 chars/line: exactly 1 (ロケーション6桁+...) group per line, padded with zeros
+// ロケーション(号-面-段, 2+2+2桁) starts right after 'E' in both layouts; only the
+// packing differs. 本数(qty) in the 50-char layout is not reliably decodable and is
+// unused downstream (回数マップ/集計はすべて「出現回数」ベースで、本数の値は使っていない)。
+function parseGroups(line) {
+  const body = line.slice(1);
+  const out = [];
+  if (body.length <= 45) {
+    // 46-char layout: 3 groups packed into 13-char slots
+    for (let i = 0; i < body.length; i += 13) {
+      const g = body.slice(i, i + 13).slice(0, 9);
+      if (g.trim() === '') continue;
+      const loc = g.slice(0, 6);
+      const qty = g.slice(6, 9);
+      out.push([parseInt(loc.slice(0,2),10), parseInt(loc.slice(2,4),10), parseInt(loc.slice(4,6),10), parseInt(qty,10) || 0]);
+    }
+  } else if (body.length >= 48) {
+    // 50-char layout: single ロケーション per line, rest is zero-padded filler
+    const loc = body.slice(0, 6);
+    if (loc.trim() !== '') {
+      const qty = parseInt(body.slice(6, 11), 10) || 0;
+      out.push([parseInt(loc.slice(0,2),10), parseInt(loc.slice(2,4),10), parseInt(loc.slice(4,6),10), qty]);
+    }
+  } else {
+    throw new Error(`未対応のレコード長です（${line.length}文字）。フォーマットが変わっている可能性があります。`);
+  }
+  return out;
+}
+
+function loadOrders(text) {
+  const lines = text.split('\r\n').filter(l => l.length > 0);
+  if (lines.length === 0) throw new Error('データが空です');
+  // Bレコード（拠点・日付・バッチNo.）より前に別レコード（Aレコード等）が付くファイルもあるため、
+  // 先頭固定ではなく最初に現れる'B'始まりの行を探す。
+  const bIdx = lines.findIndex(l => l.startsWith('B'));
+  if (bIdx === -1) throw new Error('Bレコード（拠点・日付ヘッダー）が見つかりません');
+  const bLine = lines[bIdx];
+  const recs = lines.slice(bIdx + 1);
+
+  let lastHIdx = -1;
+  for (let i = 0; i < recs.length; i++) {
+    if (recs[i].startsWith('H')) lastHIdx = i;
+  }
+  if (lastHIdx === -1) throw new Error('Hレコード（オリコンヘッダー）が見つかりません');
+
+  const orders = [];
+  let cur = null;
+  for (let i = 0; i <= lastHIdx; i++) {
+    const l = recs[i];
+    if (l.startsWith('H')) {
+      if (cur) orders.push(cur);
+      const no = parseInt(l.slice(1, 6), 10);
+      if (no === 99999) { cur = null; break; }
+      cur = { oriconNo: no, picks: [] };
+    } else if (l.startsWith('E') && cur) {
+      cur.picks.push(...parseGroups(l));
+    }
+  }
+  if (cur) orders.push(cur);
+
+  const inventory = [];
+  for (let i = lastHIdx + 1; i < recs.length; i++) {
+    const l = recs[i];
+    if (l.startsWith('E') && !l.startsWith('END')) {
+      inventory.push(...parseGroups(l));
+    }
+  }
+
+  // B行は 'B' + 日付8桁 + バッチNo2桁 + ...
+  const batchNo = parseInt(bLine.slice(9, 11), 10);
+
+  return { bLine, batchNo, orders, inventory };
+}
+
+function buildUnitRows(orders, batchNo) {
+  const rows = [];
+  const formationTotals = new Map(); // formationNo -> {units:Map, other, total, nOrders}
+  orders.forEach((o, idx) => {
+    const formationNo = Math.floor(idx / FORMATION_SIZE) + 1;
+    const seq = idx + 1;
+    const counts = new Map();
+    let other = 0;
+    for (const [u,,,] of o.picks) {
+      if (u >= 1 && u <= 46) counts.set(u, (counts.get(u)||0)+1);
+      else other++;
+    }
+    let total = other;
+    for (const v of counts.values()) total += v;
+    rows.push({ batch:batchNo, sub:1, formationNo, seq, oriconNo:o.oriconNo, counts, other, total });
+
+    if (!formationTotals.has(formationNo)) {
+      formationTotals.set(formationNo, { units:new Map(), other:0, total:0, nOrders:0 });
+    }
+    const ft = formationTotals.get(formationNo);
+    for (const [u,c] of counts) ft.units.set(u, (ft.units.get(u)||0)+c);
+    ft.other += other;
+    ft.total += total;
+    ft.nOrders += 1;
+  });
+  return { rows, formationTotals };
+}
+
+function buildMapCells(orders) {
+  const cellCounts = new Map(); // key "u-f-p" -> count
+  for (const o of orders) {
+    for (const [u,f,p,] of o.picks) {
+      if (C_ZONE_UNITS.includes(u)) {
+        const key = `${u}-${f}-${p}`;
+        cellCounts.set(key, (cellCounts.get(key)||0)+1);
+      }
+    }
+  }
+  return cellCounts;
+}
+
+function buildZoneCounts(orders) {
+  const unitTotals = new Map();
+  for (const o of orders) {
+    for (const [u,,,] of o.picks) {
+      unitTotals.set(u, (unitTotals.get(u)||0)+1);
+    }
+  }
+  const zoneCounts = new Map(); // zoneNo -> count
+  for (const z of ZONES) {
+    let total = 0;
+    for (const u of z.units) total += unitTotals.get(u) || 0;
+    zoneCounts.set(z.zoneNo, total);
+  }
+  return zoneCounts;
+}
+
+function cellStyle(bg, fg) {
+  let s = '';
+  if (bg) s += `background:${bg};`;
+  if (fg) s += `color:${fg};`;
+  return s;
+}
+
+function renderUnitTable(rows) {
+  const cols = ['バッチ','サブ','編成順','流し順','ｵﾘｺﾝNo', ...MAIN_UNITS.map(String), '他', '計'];
+  const table = document.createElement('table');
+  table.className = 'datatable';
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  cols.forEach((c,i) => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    if (i < 5) th.className = 'rowlabel';
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (const r of rows) {
+    const tr = document.createElement('tr');
+    [r.batch, r.sub, r.formationNo, r.seq, r.oriconNo].forEach((v,i) => {
+      const td = document.createElement('td');
+      td.textContent = v;
+      td.className = 'rowlabel';
+      tr.appendChild(td);
+    });
+    for (const u of MAIN_UNITS) {
+      const v = r.counts.get(u) || 0;
+      const td = document.createElement('td');
+      if (v) {
+        td.textContent = v;
+        const c = countColor(v);
+        td.setAttribute('style', cellStyle(c.bg, c.fg));
+      }
+      tr.appendChild(td);
+    }
+    const otherTd = document.createElement('td');
+    if (r.other) {
+      otherTd.textContent = r.other;
+      const c = countColor(r.other);
+      otherTd.setAttribute('style', cellStyle(c.bg, c.fg));
+    }
+    tr.appendChild(otherTd);
+    const totalTd = document.createElement('td');
+    totalTd.textContent = r.total;
+    const c = countColor(r.total);
+    if (c) totalTd.setAttribute('style', cellStyle(c.bg, c.fg));
+    tr.appendChild(totalTd);
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderFormationTable(formationTotals, batchNo) {
+  const cols = ['バッチ','サブ','編成順','オリコン数', ...MAIN_UNITS.map(String), '他', '計'];
+  const table = document.createElement('table');
+  table.className = 'datatable';
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  cols.forEach((c,i) => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    if (i < 4) th.className = 'rowlabel';
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  const grand = { units:new Map(), other:0, total:0 };
+  const keys = Array.from(formationTotals.keys()).sort((a,b)=>a-b);
+  for (const fno of keys) {
+    const ft = formationTotals.get(fno);
+    const tr = document.createElement('tr');
+    [batchNo, 1, fno, ft.nOrders].forEach(v => {
+      const td = document.createElement('td');
+      td.textContent = v;
+      td.className = 'rowlabel';
+      tr.appendChild(td);
+    });
+    for (const u of MAIN_UNITS) {
+      const v = ft.units.get(u) || 0;
+      const td = document.createElement('td');
+      if (v) {
+        td.textContent = v;
+        const c = countColor(v);
+        td.setAttribute('style', cellStyle(c.bg, c.fg));
+      }
+      tr.appendChild(td);
+      grand.units.set(u, (grand.units.get(u)||0) + v);
+    }
+    const otherTd = document.createElement('td');
+    if (ft.other) {
+      otherTd.textContent = ft.other;
+      const c = countColor(ft.other);
+      otherTd.setAttribute('style', cellStyle(c.bg, c.fg));
+    }
+    tr.appendChild(otherTd);
+    const totalTd = document.createElement('td');
+    totalTd.textContent = ft.total;
+    const c = countColor(ft.total);
+    if (c) totalTd.setAttribute('style', cellStyle(c.bg, c.fg));
+    tr.appendChild(totalTd);
+    tbody.appendChild(tr);
+    grand.other += ft.other;
+    grand.total += ft.total;
+  }
+  // grand total row
+  const gtr = document.createElement('tr');
+  gtr.className = 'total';
+  ['','','計',''].forEach(v => {
+    const td = document.createElement('td');
+    td.textContent = v;
+    td.className = 'rowlabel';
+    gtr.appendChild(td);
+  });
+  for (const u of MAIN_UNITS) {
+    const td = document.createElement('td');
+    td.textContent = grand.units.get(u) || 0;
+    gtr.appendChild(td);
+  }
+  const gOther = document.createElement('td'); gOther.textContent = grand.other; gtr.appendChild(gOther);
+  const gTotal = document.createElement('td'); gTotal.textContent = grand.total; gtr.appendChild(gTotal);
+  tbody.appendChild(gtr);
+
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderMap(cellCounts) {
+  const table = document.createElement('table');
+  table.className = 'mapgrid';
+  const thead = document.createElement('thead');
+
+  const unitRow = document.createElement('tr');
+  const cornerTh = document.createElement('th');
+  cornerTh.className = 'collabel';
+  cornerTh.textContent = '段';
+  unitRow.appendChild(cornerTh);
+  C_ZONE_UNITS.forEach((u, i) => {
+    const th = document.createElement('th');
+    th.textContent = `${u}号`;
+    th.colSpan = 4;
+    unitRow.appendChild(th);
+    if (i < C_ZONE_UNITS.length - 1) {
+      const gapTh = document.createElement('th');
+      gapTh.className = 'gap';
+      unitRow.appendChild(gapTh);
+    }
+  });
+  thead.appendChild(unitRow);
+
+  const faceRow = document.createElement('tr');
+  const cornerTh2 = document.createElement('th');
+  cornerTh2.className = 'collabel';
+  cornerTh2.textContent = '列';
+  faceRow.appendChild(cornerTh2);
+  C_ZONE_UNITS.forEach((u, i) => {
+    for (let f = 1; f <= 4; f++) {
+      const th = document.createElement('th');
+      th.textContent = f;
+      faceRow.appendChild(th);
+    }
+    if (i < C_ZONE_UNITS.length - 1) {
+      const gapTh = document.createElement('th');
+      gapTh.className = 'gap';
+      faceRow.appendChild(gapTh);
+    }
+  });
+  thead.appendChild(faceRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  for (let pos = 1; pos <= MAP_MAX_POS; pos++) {
+    const tr = document.createElement('tr');
+    const labelTd = document.createElement('td');
+    labelTd.className = 'rowlabel';
+    labelTd.textContent = pos;
+    tr.appendChild(labelTd);
+    C_ZONE_UNITS.forEach((u, i) => {
+      for (let f = 1; f <= 4; f++) {
+        const v = cellCounts.get(`${u}-${f}-${pos}`) || 0;
+        const td = document.createElement('td');
+        if (f === 1) td.classList.add('unitedge-l');
+        if (f === 4) td.classList.add('unitedge-r');
+        if (v) {
+          td.textContent = v;
+          const bg = mapColor(v);
+          if (bg) td.setAttribute('style', `background:${bg};`);
+        }
+        tr.appendChild(td);
+      }
+      if (i < C_ZONE_UNITS.length - 1) {
+        const gapTd = document.createElement('td');
+        gapTd.className = 'gap';
+        tr.appendChild(gapTd);
+      }
+    });
+    tbody.appendChild(tr);
+  }
+
+  // subtotal row
+  const subTr = document.createElement('tr');
+  subTr.className = 'subtotal';
+  const subLabel = document.createElement('td');
+  subLabel.className = 'rowlabel';
+  subLabel.textContent = '小計';
+  subTr.appendChild(subLabel);
+  C_ZONE_UNITS.forEach((u, i) => {
+    let total = 0;
+    for (const [key, v] of cellCounts) {
+      if (key.startsWith(`${u}-`)) total += v;
+    }
+    const td = document.createElement('td');
+    td.textContent = total;
+    td.colSpan = 4;
+    subTr.appendChild(td);
+    if (i < C_ZONE_UNITS.length - 1) {
+      const gapTd = document.createElement('td');
+      gapTd.className = 'gap';
+      subTr.appendChild(gapTd);
+    }
+  });
+  tbody.appendChild(subTr);
+
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderZoneHeatmap(zoneCounts) {
+  const table = document.createElement('table');
+  table.className = 'mapgrid';
+  const thead = document.createElement('thead');
+
+  const noRow = document.createElement('tr');
+  const corner = document.createElement('th');
+  corner.className = 'collabel wide';
+  corner.textContent = 'ゾーン';
+  noRow.appendChild(corner);
+  ZONES.forEach((z, i) => {
+    const th = document.createElement('th');
+    th.className = 'wide';
+    th.textContent = z.zoneNo;
+    noRow.appendChild(th);
+    if (i === 22 || i === 23) { // 1-46号機ゾーン / 51-58号機ゾーン の後に区切り
+      const gapTh = document.createElement('th');
+      gapTh.className = 'gap';
+      noRow.appendChild(gapTh);
+    }
+  });
+  thead.appendChild(noRow);
+
+  const labelRow = document.createElement('tr');
+  const corner2 = document.createElement('th');
+  corner2.className = 'collabel wide';
+  corner2.textContent = '号機';
+  labelRow.appendChild(corner2);
+  ZONES.forEach((z, i) => {
+    const th = document.createElement('th');
+    th.className = 'wide';
+    th.style.fontWeight = 'normal';
+    th.style.fontSize = '10px';
+    th.textContent = z.label;
+    labelRow.appendChild(th);
+    if (i === 22 || i === 23) {
+      const gapTh = document.createElement('th');
+      gapTh.className = 'gap';
+      labelRow.appendChild(gapTh);
+    }
+  });
+  thead.appendChild(labelRow);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  const tr = document.createElement('tr');
+  const rowLabel = document.createElement('td');
+  rowLabel.className = 'rowlabel wide';
+  rowLabel.textContent = '回数';
+  tr.appendChild(rowLabel);
+  ZONES.forEach((z, i) => {
+    const v = zoneCounts.get(z.zoneNo) || 0;
+    const td = document.createElement('td');
+    td.className = 'wide';
+    if (v) {
+      td.textContent = v;
+      const bg = mapColor(v);
+      if (bg) td.setAttribute('style', `background:${bg};`);
+    }
+    tr.appendChild(td);
+    if (i === 22 || i === 23) {
+      const gapTd = document.createElement('td');
+      gapTd.className = 'gap';
+      tr.appendChild(gapTd);
+    }
+  });
+  tbody.appendChild(tr);
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderInventoryTable(inventory) {
+  const table = document.createElement('table');
+  table.className = 'datatable';
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  ['号','段','列','在庫数'].forEach(c => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+  const tbody = document.createElement('tbody');
+  for (const [u,f,p,q] of inventory) {
+    const tr = document.createElement('tr');
+    [u,p,f,q].forEach(v => {
+      const td = document.createElement('td');
+      td.textContent = v;
+      tr.appendChild(td);
+    });
+    tbody.appendChild(tr);
+  }
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderCountLegend(container) {
+  container.innerHTML = '';
+  const label = document.createElement('span');
+  label.textContent = '色:回数';
+  container.appendChild(label);
+  for (let v = 1; v <= 6; v++) {
+    const c = countColor(v);
+    const span = document.createElement('span');
+    span.className = 'swatch';
+    span.textContent = v === 6 ? '6+' : String(v);
+    span.setAttribute('style', cellStyle(c.bg, c.fg));
+    container.appendChild(span);
+  }
+}
+
+function renderMapLegend(container) {
+  container.innerHTML = '';
+  const label = document.createElement('span');
+  label.textContent = '色:回数';
+  container.appendChild(label);
+  for (const b of MAP_BANDS) {
+    const span = document.createElement('span');
+    span.className = 'swatch';
+    span.textContent = b.label;
+    if (b.color) span.setAttribute('style', `background:${b.color};`);
+    container.appendChild(span);
+  }
+}
+
+function csvEscape(v) {
+  const s = String(v ?? '');
+  if (/[",\n]/.test(s)) return '"' + s.replace(/"/g,'""') + '"';
+  return s;
+}
+
+function downloadCSV(filename, headerRow, dataRows) {
+  const lines = [headerRow, ...dataRows].map(row => row.map(csvEscape).join(','));
+  const csv = '﻿' + lines.join('\r\n');
+  const blob = new Blob([csv], { type: 'text/csv;charset=utf-8;' });
+  const url = URL.createObjectURL(blob);
+  const a = document.createElement('a');
+  a.href = url;
+  a.download = filename;
+  document.body.appendChild(a);
+  a.click();
+  a.remove();
+  URL.revokeObjectURL(url);
+}
+
+function togglePanel(id) {
+  document.getElementById(id).classList.toggle('collapsed');
+}
+
+let state = null;
+
+function handleFile(file) {
+  const errBox = document.getElementById('loadError');
+  errBox.textContent = '';
+  const reader = new FileReader();
+  reader.onload = () => {
+    try {
+      const buf = reader.result;
+      const text = new TextDecoder('shift-jis').decode(buf);
+      const { bLine, batchNo, orders, inventory } = loadOrders(text);
+      const { rows, formationTotals } = buildUnitRows(orders, batchNo);
+      const cellCounts = buildMapCells(orders);
+      const zoneCounts = buildZoneCounts(orders);
+      state = { bLine, batchNo, orders, inventory, rows, formationTotals, cellCounts, zoneCounts };
+      renderAll();
+    } catch (e) {
+      errBox.textContent = '読み込みエラー: ' + e.message;
+      console.error(e);
+    }
+  };
+  reader.onerror = () => {
+    errBox.textContent = 'ファイルの読み込みに失敗しました。';
+  };
+  reader.readAsArrayBuffer(file);
+}
+
+function renderAll() {
+  document.getElementById('statsRow').style.display = 'flex';
+  document.getElementById('statBLine').textContent = state.bLine.trim();
+  document.getElementById('statBatch').textContent = state.batchNo;
+  document.getElementById('statOrders').textContent = state.orders.length;
+  document.getElementById('statFormations').textContent = state.formationTotals.size;
+  document.getElementById('statInventory').textContent = state.inventory.length;
+
+  renderMapLegend(document.getElementById('mapLegend'));
+  const mapOut = document.getElementById('mapOutput');
+  mapOut.innerHTML = '';
+  mapOut.appendChild(renderMap(state.cellCounts));
+
+  renderMapLegend(document.getElementById('zoneLegend'));
+  const zoneOut = document.getElementById('zoneOutput');
+  zoneOut.innerHTML = '';
+  zoneOut.appendChild(renderZoneHeatmap(state.zoneCounts));
+
+  renderCountLegend(document.getElementById('unitLegend'));
+  const unitOut = document.getElementById('unitOutput');
+  unitOut.innerHTML = '';
+  unitOut.appendChild(renderUnitTable(state.rows));
+
+  renderCountLegend(document.getElementById('formationLegend'));
+  const formationOut = document.getElementById('formationOutput');
+  formationOut.innerHTML = '';
+  formationOut.appendChild(renderFormationTable(state.formationTotals, state.batchNo));
+
+  const invOut = document.getElementById('invOutput');
+  invOut.innerHTML = '';
+  invOut.appendChild(renderInventoryTable(state.inventory));
+
+  document.getElementById('mapCsvBtn').disabled = false;
+  document.getElementById('zoneCsvBtn').disabled = false;
+  document.getElementById('unitCsvBtn').disabled = false;
+  document.getElementById('formationCsvBtn').disabled = false;
+  document.getElementById('invCsvBtn').disabled = false;
+}
+
+document.getElementById('fileInput').addEventListener('change', (e) => {
+  const file = e.target.files[0];
+  if (file) handleFile(file);
+});
+
+document.getElementById('mapCsvBtn').addEventListener('click', () => {
+  const header = ['段', ...C_ZONE_UNITS.flatMap(u => [1,2,3,4].map(f => `${u}号-${f}列`))];
+  const rows = [];
+  for (let pos = 1; pos <= MAP_MAX_POS; pos++) {
+    const row = [pos];
+    for (const u of C_ZONE_UNITS) {
+      for (let f = 1; f <= 4; f++) {
+        row.push(state.cellCounts.get(`${u}-${f}-${pos}`) || 0);
+      }
+    }
+    rows.push(row);
+  }
+  downloadCSV('石狩Cバラマップ.csv', header, rows);
+});
+
+document.getElementById('zoneCsvBtn').addEventListener('click', () => {
+  const header = ['ゾーン','号機範囲','回数'];
+  const rows = ZONES.map(z => [z.zoneNo, z.label, state.zoneCounts.get(z.zoneNo) || 0]);
+  downloadCSV('ゾーン別回数ヒートマップ.csv', header, rows);
+});
+
+document.getElementById('unitCsvBtn').addEventListener('click', () => {
+  const header = ['バッチ','サブ','編成順','流し順','ｵﾘｺﾝNo', ...MAIN_UNITS.map(String), '他', '計'];
+  const rows = state.rows.map(r => [
+    r.batch, r.sub, r.formationNo, r.seq, r.oriconNo,
+    ...MAIN_UNITS.map(u => r.counts.get(u) || 0),
+    r.other, r.total
+  ]);
+  downloadCSV('号機別ピッキング回数.csv', header, rows);
+});
+
+document.getElementById('formationCsvBtn').addEventListener('click', () => {
+  const header = ['バッチ','サブ','編成順','オリコン数', ...MAIN_UNITS.map(String), '他', '計'];
+  const keys = Array.from(state.formationTotals.keys()).sort((a,b)=>a-b);
+  const rows = keys.map(fno => {
+    const ft = state.formationTotals.get(fno);
+    return [state.batchNo, 1, fno, ft.nOrders, ...MAIN_UNITS.map(u => ft.units.get(u) || 0), ft.other, ft.total];
+  });
+  downloadCSV('編成別投入回数.csv', header, rows);
+});
+
+document.getElementById('invCsvBtn').addEventListener('click', () => {
+  const header = ['号','段','列','在庫数'];
+  const rows = state.inventory.map(([u,f,p,q]) => [u,p,f,q]);
+  downloadCSV('出荷済ロケーション在庫一覧.csv', header, rows);
+});
+</script>
+</body>
+</html>
