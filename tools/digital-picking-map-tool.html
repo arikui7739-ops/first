@@ -170,8 +170,20 @@
   </div>
 </div>
 
+<div class="panel" id="formationZonePanel">
+  <h2 onclick="togglePanel('formationZonePanel')"><span class="arrow">▼</span> 6. 編成別投入回数（ゾーン別）</h2>
+  <div class="body">
+    <div class="row">
+      <span class="hint">編成 = 先頭オリコンから6オリコン単位で区切って集計。列は号機ではなくゾーン（1〜25、パネル3のゾーン定義と同一）単位。</span>
+      <button id="formationZoneCsvBtn" disabled>CSVダウンロード</button>
+    </div>
+    <div class="legend" id="formationZoneLegend"></div>
+    <div class="gridwrap" id="formationZoneOutput"></div>
+  </div>
+</div>
+
 <div class="panel collapsed" id="inventoryPanel">
-  <h2 onclick="togglePanel('inventoryPanel')"><span class="arrow">▼</span> 6. 出荷済ロケーション在庫一覧（参考・集計対象外）</h2>
+  <h2 onclick="togglePanel('inventoryPanel')"><span class="arrow">▼</span> 7. 出荷済ロケーション在庫一覧（参考・集計対象外）</h2>
   <div class="body">
     <div class="row">
       <span class="hint">ファイル末尾のブロック。出荷回数マップ・回数集計には含めていません。</span>
@@ -199,6 +211,8 @@ const ZONES = (() => {
   zones.push({ zoneNo: 25, units: [61,62,63,64,65,66,67,68], label: '61-68号機' });
   return zones;
 })();
+const ZONE_OF_UNIT = new Map();
+for (const z of ZONES) for (const u of z.units) ZONE_OF_UNIT.set(u, z.zoneNo);
 
 // count gradient for 号機別ピッキング回数 / 編成別投入回数: 1=薄い青 -> 6+=濃い青
 const COUNT_LOW = [0xDD, 0xEB, 0xF7];
@@ -344,19 +358,33 @@ function buildMapCells(orders) {
 }
 
 function buildZoneCounts(orders) {
-  const unitTotals = new Map();
+  const zoneCounts = new Map(); // zoneNo -> count
   for (const o of orders) {
     for (const [u,,,] of o.picks) {
-      unitTotals.set(u, (unitTotals.get(u)||0)+1);
+      const zoneNo = ZONE_OF_UNIT.get(u);
+      if (zoneNo) zoneCounts.set(zoneNo, (zoneCounts.get(zoneNo)||0)+1);
     }
   }
-  const zoneCounts = new Map(); // zoneNo -> count
-  for (const z of ZONES) {
-    let total = 0;
-    for (const u of z.units) total += unitTotals.get(u) || 0;
-    zoneCounts.set(z.zoneNo, total);
-  }
   return zoneCounts;
+}
+
+function buildFormationZoneTotals(orders) {
+  const formationTotals = new Map(); // formationNo -> {zones:Map, other, total, nOrders}
+  orders.forEach((o, idx) => {
+    const formationNo = Math.floor(idx / FORMATION_SIZE) + 1;
+    if (!formationTotals.has(formationNo)) {
+      formationTotals.set(formationNo, { zones:new Map(), other:0, total:0, nOrders:0 });
+    }
+    const ft = formationTotals.get(formationNo);
+    for (const [u,,,] of o.picks) {
+      const zoneNo = ZONE_OF_UNIT.get(u);
+      if (zoneNo) ft.zones.set(zoneNo, (ft.zones.get(zoneNo)||0)+1);
+      else ft.other++;
+      ft.total++;
+    }
+    ft.nOrders += 1;
+  });
+  return formationTotals;
 }
 
 function cellStyle(bg, fg) {
@@ -484,6 +512,82 @@ function renderFormationTable(formationTotals, batchNo) {
   for (const u of MAIN_UNITS) {
     const td = document.createElement('td');
     td.textContent = grand.units.get(u) || 0;
+    gtr.appendChild(td);
+  }
+  const gOther = document.createElement('td'); gOther.textContent = grand.other; gtr.appendChild(gOther);
+  const gTotal = document.createElement('td'); gTotal.textContent = grand.total; gtr.appendChild(gTotal);
+  tbody.appendChild(gtr);
+
+  table.appendChild(tbody);
+  return table;
+}
+
+function renderFormationZoneTable(formationZoneTotals, batchNo) {
+  const cols = ['バッチ','サブ','編成順','オリコン数', ...ZONES.map(z => String(z.zoneNo)), '他', '計'];
+  const table = document.createElement('table');
+  table.className = 'datatable';
+  const thead = document.createElement('thead');
+  const htr = document.createElement('tr');
+  cols.forEach((c,i) => {
+    const th = document.createElement('th');
+    th.textContent = c;
+    if (i < 4) th.className = 'rowlabel';
+    htr.appendChild(th);
+  });
+  thead.appendChild(htr);
+  table.appendChild(thead);
+
+  const tbody = document.createElement('tbody');
+  const grand = { zones:new Map(), other:0, total:0 };
+  const keys = Array.from(formationZoneTotals.keys()).sort((a,b)=>a-b);
+  for (const fno of keys) {
+    const ft = formationZoneTotals.get(fno);
+    const tr = document.createElement('tr');
+    [batchNo, 1, fno, ft.nOrders].forEach(v => {
+      const td = document.createElement('td');
+      td.textContent = v;
+      td.className = 'rowlabel';
+      tr.appendChild(td);
+    });
+    for (const z of ZONES) {
+      const v = ft.zones.get(z.zoneNo) || 0;
+      const td = document.createElement('td');
+      if (v) {
+        td.textContent = v;
+        const c = countColor(v);
+        td.setAttribute('style', cellStyle(c.bg, c.fg));
+      }
+      tr.appendChild(td);
+      grand.zones.set(z.zoneNo, (grand.zones.get(z.zoneNo)||0) + v);
+    }
+    const otherTd = document.createElement('td');
+    if (ft.other) {
+      otherTd.textContent = ft.other;
+      const c = countColor(ft.other);
+      otherTd.setAttribute('style', cellStyle(c.bg, c.fg));
+    }
+    tr.appendChild(otherTd);
+    const totalTd = document.createElement('td');
+    totalTd.textContent = ft.total;
+    const c = countColor(ft.total);
+    if (c) totalTd.setAttribute('style', cellStyle(c.bg, c.fg));
+    tr.appendChild(totalTd);
+    tbody.appendChild(tr);
+    grand.other += ft.other;
+    grand.total += ft.total;
+  }
+  // grand total row
+  const gtr = document.createElement('tr');
+  gtr.className = 'total';
+  ['','','計',''].forEach(v => {
+    const td = document.createElement('td');
+    td.textContent = v;
+    td.className = 'rowlabel';
+    gtr.appendChild(td);
+  });
+  for (const z of ZONES) {
+    const td = document.createElement('td');
+    td.textContent = grand.zones.get(z.zoneNo) || 0;
     gtr.appendChild(td);
   }
   const gOther = document.createElement('td'); gOther.textContent = grand.other; gtr.appendChild(gOther);
@@ -758,7 +862,8 @@ function handleFile(file) {
       const { rows, formationTotals } = buildUnitRows(orders, batchNo);
       const cellCounts = buildMapCells(orders);
       const zoneCounts = buildZoneCounts(orders);
-      state = { bLine, batchNo, orders, inventory, rows, formationTotals, cellCounts, zoneCounts };
+      const formationZoneTotals = buildFormationZoneTotals(orders);
+      state = { bLine, batchNo, orders, inventory, rows, formationTotals, cellCounts, zoneCounts, formationZoneTotals };
       renderAll();
     } catch (e) {
       errBox.textContent = '読み込みエラー: ' + e.message;
@@ -799,6 +904,11 @@ function renderAll() {
   formationOut.innerHTML = '';
   formationOut.appendChild(renderFormationTable(state.formationTotals, state.batchNo));
 
+  renderCountLegend(document.getElementById('formationZoneLegend'));
+  const formationZoneOut = document.getElementById('formationZoneOutput');
+  formationZoneOut.innerHTML = '';
+  formationZoneOut.appendChild(renderFormationZoneTable(state.formationZoneTotals, state.batchNo));
+
   const invOut = document.getElementById('invOutput');
   invOut.innerHTML = '';
   invOut.appendChild(renderInventoryTable(state.inventory));
@@ -807,6 +917,7 @@ function renderAll() {
   document.getElementById('zoneCsvBtn').disabled = false;
   document.getElementById('unitCsvBtn').disabled = false;
   document.getElementById('formationCsvBtn').disabled = false;
+  document.getElementById('formationZoneCsvBtn').disabled = false;
   document.getElementById('invCsvBtn').disabled = false;
 }
 
@@ -854,6 +965,16 @@ document.getElementById('formationCsvBtn').addEventListener('click', () => {
     return [state.batchNo, 1, fno, ft.nOrders, ...MAIN_UNITS.map(u => ft.units.get(u) || 0), ft.other, ft.total];
   });
   downloadCSV('編成別投入回数.csv', header, rows);
+});
+
+document.getElementById('formationZoneCsvBtn').addEventListener('click', () => {
+  const header = ['バッチ','サブ','編成順','オリコン数', ...ZONES.map(z => String(z.zoneNo)), '他', '計'];
+  const keys = Array.from(state.formationZoneTotals.keys()).sort((a,b)=>a-b);
+  const rows = keys.map(fno => {
+    const ft = state.formationZoneTotals.get(fno);
+    return [state.batchNo, 1, fno, ft.nOrders, ...ZONES.map(z => ft.zones.get(z.zoneNo) || 0), ft.other, ft.total];
+  });
+  downloadCSV('編成別投入回数_ゾーン別.csv', header, rows);
 });
 
 document.getElementById('invCsvBtn').addEventListener('click', () => {
