@@ -17,9 +17,9 @@ Attribute VB_Name = "Module4"
 ' 出力結果・ロジックは元のまま。
 '
 ' 【石狩版追加】
-' 「就業時間 （石狩LC）」シートを作成後に自動で更新対象へ含めるよう
-' 追加。シート未作成の間はSheetExists()でスキップするのでエラーに
-' ならない。
+' 「就業時間 （石狩LC）」「日別 （石狩LC・バラ）」シートを作成後に
+' 自動で更新対象へ含めるよう追加。シート未作成の間はSheetExists()で
+' スキップするのでエラーにならない。
 '============================================================
 Sub 計算()
 'マクロ記録日 : 2008/5/12  ユーザー名 : Kao
@@ -41,6 +41,10 @@ Sub 計算()
 
     If SheetExists("就業時間 （石狩LC）") Then
         Sheets("就業時間 （石狩LC）").PivotTables("ﾋﾟﾎﾞｯﾄﾃｰﾌﾞﾙ1").RefreshTable
+    End If
+
+    If SheetExists("日別 （石狩LC・バラ）") Then
+        Sheets("日別 （石狩LC・バラ）").PivotTables("ﾋﾟﾎﾞｯﾄﾃｰﾌﾞﾙ1").RefreshTable
     End If
 
 ErrHandler:
