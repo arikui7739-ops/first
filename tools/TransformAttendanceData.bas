@@ -19,7 +19,7 @@ Sub 変換処理()
     Dim shu As Variant       '集計区分(対比)配列
     Dim kin As Variant       '勤務区分(対比)配列
     Dim i As Long, Z As Long, kenS As Long
-    Dim che As Double, kyu As Double, v15 As Double, v16 As Double
+    Dim che As Variant, kyu As Variant, v15 As Variant, v16 As Variant
 
     On Error GoTo ErrHandler
 
@@ -191,7 +191,7 @@ ErrHandler:
     Application.DisplayAlerts = True
 
     If Err.Number <> 0 Then
-        MsgBox "エラーが発生しました：" & Err.Description, vbExclamation
+        MsgBox "エラーが発生しました：" & Err.Description & vbCrLf & "（新ツール貼付け上の行番号：" & (i + 1) & "行目付近）", vbExclamation
     End If
 
 End Sub
