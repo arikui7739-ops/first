@@ -505,6 +505,9 @@ Sub OptimizeABFormationFlow()
 
         ' 7. 同号機分散ロケーション変更指示(同号機内(対面を除く)ペアのみを対象にする。対面ヒットは対象外)
         Dim maxSameMachPairs As Long: maxSameMachPairs = dictPairs.Count - dictCrossFace.Count
+        ' 対象ペアが無い/入替案が1件も出ない場合でも均衡化スコアが算出できるよう、既定値を変更前と同じにしておく
+        Dim oddTotalSM As Double, evenTotalSM As Double
+        oddTotalSM = oddTotalStart: evenTotalSM = evenTotalStart
         If maxSameMachPairs > 0 Then
             Dim smPairArr() As Variant
             ReDim smPairArr(1 To maxSameMachPairs, 1 To 6)
@@ -544,8 +547,6 @@ Sub OptimizeABFormationFlow()
             wsTempSM.Delete
 
             ' 入替案の決定(このシート専用に、奇数/偶数の合計を独立して再計算する)
-            Dim oddTotalSM As Double, evenTotalSM As Double
-            oddTotalSM = oddTotalStart: evenTotalSM = evenTotalStart
             Dim outArrSM() As Variant
             ReDim outArrSM(1 To smCnt, 1 To 13)
             Dim outCntSM As Long: outCntSM = 0
@@ -684,6 +685,19 @@ Sub OptimizeABFormationFlow()
                 wsOutSM.Range("A4:M4").Font.Bold = True
                 wsOutSM.Columns("A:M").AutoFit
             End If
+        End If
+
+        ' 同号機分散の均衡化スコア(0～100、100が完全均衡)。上のセクション7で独立に再計算したoddTotalSM/evenTotalSMを使う
+        Dim balanceScoreBeforeSM As Double, balanceScoreAfterSM As Double
+        If (oddTotalStart + evenTotalStart) > 0 Then
+            balanceScoreBeforeSM = 100 * (1 - Abs(oddTotalStart - evenTotalStart) / (oddTotalStart + evenTotalStart))
+        Else
+            balanceScoreBeforeSM = 100
+        End If
+        If (oddTotalSM + evenTotalSM) > 0 Then
+            balanceScoreAfterSM = 100 * (1 - Abs(oddTotalSM - evenTotalSM) / (oddTotalSM + evenTotalSM))
+        Else
+            balanceScoreAfterSM = 100
         End If
 
         ' KPI記録:AB稼働率スコア(号機回数比の目標比率実績値と、今回ファイル集計結果との近さ)
@@ -840,7 +854,7 @@ Sub OptimizeABFormationFlow()
         End If
 
         ' 「AB編成KPI」シートに実施日ごと1行で記録する(同日なら上書き)
-        Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore, balanceScoreBefore, balanceScoreAfter)
+        Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore, balanceScoreBefore, balanceScoreAfter, balanceScoreBeforeSM, balanceScoreAfterSM)
 
         Dim completeMsg As String
         completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
@@ -1141,28 +1155,31 @@ Sub EnsureKPISheet()
     Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
     wsKPI.Name = "AB編成KPI"
 
-    wsKPI.Range("A1:F1").Merge
+    wsKPI.Range("A1:H1").Merge
     wsKPI.Range("A1").Value = "【AB編成 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
     wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
 
-    wsKPI.Range("A3:F3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア", "均衡化スコア(変更前)", "均衡化スコア(変更後)")
-    wsKPI.Range("A3:F3").Interior.Color = RGB(220, 230, 255)
-    wsKPI.Range("A3:F3").Font.Bold = True
+    wsKPI.Range("A3:H3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア", "均衡化スコア(変更前)", "均衡化スコア(変更後)", "同号機分散均衡化スコア(変更前)", "同号機分散均衡化スコア(変更後)")
+    wsKPI.Range("A3:H3").Interior.Color = RGB(220, 230, 255)
+    wsKPI.Range("A3:H3").Font.Bold = True
 
     wsKPI.Columns("A:A").ColumnWidth = 12
-    wsKPI.Columns("B:F").ColumnWidth = 20
+    wsKPI.Columns("B:H").ColumnWidth = 20
     wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
     wsKPI.Columns("B:C").NumberFormat = "0.0%" ' 上限比率・実績比率は0～1の割合値で渡ってくる
-    wsKPI.Columns("D:F").NumberFormat = "0.0"  ' 回避スコア・均衡化スコアは0～100点
+    wsKPI.Columns("D:H").NumberFormat = "0.0"  ' 回避スコア・均衡化スコアは0～100点
 End Sub
 
-' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア(変更前後)を
-' 「AB編成KPI」シートに記録する。同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
+' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア(変更前後)・
+' 同号機分散均衡化スコア(変更前後)を「AB編成KPI」シートに記録する。
+' 同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
 ' abTheoreticalRatio:全体の回数上位abSlotCount件(AB間口数)が占める比率(AB管理の理論上の上限)
 ' abActualRatio:ABブロック内の実回数が全体に占める比率(実績)
 ' crossFaceScoreVal:同号機・対面での同時ピッキングを理論上の最小までどれだけ避けられているかのスコア(0～100、高いほど良い)
-' balanceScoreBefore/After:奇数号機・偶数号機の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。変更前(スワップ適用前)と変更後(適用後)を並べて記録する
-Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant, balanceScoreBefore As Variant, balanceScoreAfter As Variant)
+' balanceScoreBefore/After:奇数号機・偶数号機の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。
+'   変更前(スワップ適用前)と変更後(適用後)を並べて記録する(AB編成動線最適化の入替案適用時)
+' balanceScoreBeforeSM/AfterSM:同上だが、同号機分散ロケーション変更指示の入替案を適用した場合の均衡化スコア
+Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant, balanceScoreBefore As Variant, balanceScoreAfter As Variant, balanceScoreBeforeSM As Variant, balanceScoreAfterSM As Variant)
     Dim wsKPI As Worksheet
     On Error Resume Next
     Set wsKPI = ThisWorkbook.Sheets("AB編成KPI")
@@ -1189,6 +1206,8 @@ Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As V
     wsKPI.Cells(targetRow, 4).Value = crossFaceScoreVal
     wsKPI.Cells(targetRow, 5).Value = balanceScoreBefore
     wsKPI.Cells(targetRow, 6).Value = balanceScoreAfter
+    wsKPI.Cells(targetRow, 7).Value = balanceScoreBeforeSM
+    wsKPI.Cells(targetRow, 8).Value = balanceScoreAfterSM
 End Sub
 
 ' ----------------------------------------------------
