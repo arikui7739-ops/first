@@ -60,12 +60,16 @@ Sub OptimizeABFormationFlow()
     ' 0.4 「操作パネル」シート(説明・実行ボタン)が無ければ自動生成する
     Call EnsureOperationPanelSheet
 
+    ' 0.45 「AB編成KPI」シート(実施日ごとのスコア推移)が無ければ見出し行だけを用意して自動生成する
+    Call EnsureKPISheet
+
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
     Dim maxMachNum As Long: maxMachNum = 46 ' この機番までを集計・スワップ対象の範囲とする(拠点のラック総数に合わせて設定シートで変更可能)
+    Dim abSlotCount As Long: abSlotCount = 900 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount)
     Dim maxZoneNum As Long: maxZoneNum = Int((maxMachNum - 1) / 2) + 1 ' 機番を2台単位で束ねたゾーン数
 
     ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
@@ -495,6 +499,203 @@ Sub OptimizeABFormationFlow()
         Next zi
         wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatPctRow, heatLastCol)).Borders.LineStyle = xlContinuous
 
+        ' 7. 同号機分散ロケーション変更指示(同号機内(対面を除く)ペアのみを対象にする。対面ヒットは対象外)
+        Dim maxSameMachPairs As Long: maxSameMachPairs = dictPairs.Count - dictCrossFace.Count
+        ' 対象ペアが無い/入替案が1件も出ない場合でも均衡化スコアが算出できるよう、既定値を変更前と同じにしておく
+        Dim oddTotalSM As Double, evenTotalSM As Double
+        oddTotalSM = oddTotalStart: evenTotalSM = evenTotalStart
+        If maxSameMachPairs > 0 Then
+            Dim smPairArr() As Variant
+            ReDim smPairArr(1 To maxSameMachPairs, 1 To 6)
+            Dim smCnt As Long: smCnt = 0
+            Dim smKey As Variant
+            For Each smKey In dictPairs.Keys
+                If Not dictCrossFace.Exists(smKey) Then
+                    Dim smItems() As String: smItems = Split(CStr(smKey), ",")
+                    Dim smItemA As String: smItemA = smItems(0)
+                    Dim smItemB As String: smItemB = smItems(1)
+                    smCnt = smCnt + 1
+                    Dim smCoCount As Long: smCoCount = dictPairs(smKey)
+                    Dim smAnchor As String, smMover As String
+                    If dictItemHit(smItemA) >= dictItemHit(smItemB) Then
+                        smAnchor = smItemA: smMover = smItemB
+                    Else
+                        smAnchor = smItemB: smMover = smItemA
+                    End If
+                    smPairArr(smCnt, 1) = dictItemZone(smAnchor)
+                    smPairArr(smCnt, 2) = smCoCount
+                    smPairArr(smCnt, 3) = smAnchor
+                    smPairArr(smCnt, 4) = dictItemLoc(smAnchor)
+                    smPairArr(smCnt, 5) = smMover
+                    smPairArr(smCnt, 6) = dictItemLoc(smMover)
+                End If
+            Next smKey
+
+            ' 編成内共起回数(列2)の降順でソート
+            Dim wsTempSM As Worksheet: Set wsTempSM = Sheets.Add
+            wsTempSM.Columns("D:F").NumberFormat = "@"
+            wsTempSM.Range("A1").Resize(smCnt, 6).Value = smPairArr
+            wsTempSM.Sort.SortFields.Clear
+            wsTempSM.Sort.SortFields.Add Key:=wsTempSM.Range("B1:B" & smCnt), Order:=xlDescending
+            wsTempSM.Sort.SetRange wsTempSM.Range("A1:F" & smCnt)
+            wsTempSM.Sort.Apply
+            smPairArr = wsTempSM.Range("A1:F" & smCnt).Value
+            wsTempSM.Delete
+
+            ' 入替案の決定(このシート専用に、奇数/偶数の合計を独立して再計算する)
+            Dim outArrSM() As Variant
+            ReDim outArrSM(1 To smCnt, 1 To 13)
+            Dim outCntSM As Long: outCntSM = 0
+            Dim dictSwappedSM As Object: Set dictSwappedSM = CreateObject("Scripting.Dictionary")
+            Dim dictZoneUsedCountSM As Object: Set dictZoneUsedCountSM = CreateObject("Scripting.Dictionary")
+
+            Dim rsm As Long
+            For rsm = 1 To smCnt
+                If outCntSM >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
+
+                Dim aItemSM As String: aItemSM = CStr(smPairArr(rsm, 3))
+                Dim mItemSM As String: mItemSM = CStr(smPairArr(rsm, 5))
+
+                If Not dictSwappedSM.Exists(aItemSM) And Not dictSwappedSM.Exists(mItemSM) Then
+                    Dim anchorZoneSM As Integer: anchorZoneSM = dictItemZone(aItemSM)
+                    Dim targetItemSM As String: targetItemSM = ""
+
+                    Dim moverSideSM As Integer: moverSideSM = dictItemMach(mItemSM) Mod 2
+                    Dim desiredSideSM As Integer
+                    If Abs(oddTotalSM - evenTotalSM) <= 0.001 Then
+                        desiredSideSM = -1
+                    ElseIf (oddTotalSM > evenTotalSM And moverSideSM = 1) Or (evenTotalSM > oddTotalSM And moverSideSM = 0) Then
+                        desiredSideSM = 1 - moverSideSM
+                    Else
+                        desiredSideSM = moverSideSM
+                    End If
+
+                    Dim passNumSM As Integer
+                    For passNumSM = 1 To 3
+                        If targetItemSM <> "" Then Exit For
+                        Dim zKeySM As Variant
+                        For Each zKeySM In zoneItems.Keys
+                            If CInt(zKeySM) <> anchorZoneSM Then
+                                Dim zoneUsedSM As Integer
+                                If dictZoneUsedCountSM.Exists(zKeySM) Then zoneUsedSM = dictZoneUsedCountSM(zKeySM) Else zoneUsedSM = 0
+                                If passNumSM = 3 Or zoneUsedSM < MAX_PER_ZONE Then
+                                    Dim candidateSM As Variant
+                                    For Each candidateSM In zoneItems(zKeySM)
+                                        Dim candStrSM As String: candStrSM = CStr(candidateSM)
+                                        If candStrSM <> aItemSM And candStrSM <> mItemSM And Not dictSwappedSM.Exists(candStrSM) Then
+                                            If passNumSM = 1 And desiredSideSM <> -1 Then
+                                                If dictItemMach(candStrSM) Mod 2 = desiredSideSM Then
+                                                    targetItemSM = candStrSM
+                                                    Exit For
+                                                End If
+                                            Else
+                                                targetItemSM = candStrSM
+                                                Exit For
+                                            End If
+                                        End If
+                                    Next candidateSM
+                                End If
+                            End If
+                            If targetItemSM <> "" Then Exit For
+                        Next zKeySM
+                    Next passNumSM
+
+                    If targetItemSM <> "" Then
+                        Dim usedZoneKeySM As String: usedZoneKeySM = CStr(dictItemZone(targetItemSM))
+                        If dictZoneUsedCountSM.Exists(usedZoneKeySM) Then
+                            dictZoneUsedCountSM(usedZoneKeySM) = dictZoneUsedCountSM(usedZoneKeySM) + 1
+                        Else
+                            dictZoneUsedCountSM.Add usedZoneKeySM, 1
+                        End If
+
+                        Dim targetSideSM As Integer: targetSideSM = dictItemMach(targetItemSM) Mod 2
+                        If moverSideSM <> targetSideSM Then
+                            Dim moverHitsSM As Double: moverHitsSM = dictItemHit(mItemSM)
+                            Dim targetHitsSM As Double: targetHitsSM = dictItemHit(targetItemSM)
+                            If moverSideSM = 1 Then
+                                oddTotalSM = oddTotalSM - moverHitsSM + targetHitsSM
+                                evenTotalSM = evenTotalSM - targetHitsSM + moverHitsSM
+                            Else
+                                evenTotalSM = evenTotalSM - moverHitsSM + targetHitsSM
+                                oddTotalSM = oddTotalSM - targetHitsSM + moverHitsSM
+                            End If
+                        End If
+
+                        outCntSM = outCntSM + 1
+                        outArrSM(outCntSM, 1) = anchorZoneSM
+                        outArrSM(outCntSM, 2) = dictItemMach(aItemSM) & "号機内"
+                        outArrSM(outCntSM, 3) = smPairArr(rsm, 2) ' 編成内共起回数
+                        outArrSM(outCntSM, 4) = GetLocName3(dictLocName, dictItemMach(aItemSM), aItemSM)
+                        outArrSM(outCntSM, 5) = GetLocCode3(dictLocCode, dictItemMach(aItemSM), aItemSM)
+                        outArrSM(outCntSM, 6) = dictItemLoc(aItemSM)
+                        outArrSM(outCntSM, 7) = GetLocName3(dictLocName, dictItemMach(mItemSM), mItemSM)
+                        outArrSM(outCntSM, 8) = GetLocCode3(dictLocCode, dictItemMach(mItemSM), mItemSM)
+                        outArrSM(outCntSM, 9) = dictItemLoc(mItemSM)
+                        outArrSM(outCntSM, 10) = "⇔"
+                        outArrSM(outCntSM, 11) = GetLocName3(dictLocName, dictItemMach(targetItemSM), targetItemSM)
+                        outArrSM(outCntSM, 12) = GetLocCode3(dictLocCode, dictItemMach(targetItemSM), targetItemSM)
+                        outArrSM(outCntSM, 13) = dictItemLoc(targetItemSM)
+
+                        dictSwappedSM(mItemSM) = True
+                        dictSwappedSM(targetItemSM) = True
+                    End If
+                End If
+            Next rsm
+
+            If outCntSM > 0 Then
+                Dim wsOutSM As Worksheet
+                On Error Resume Next
+                Sheets("同号機分散ロケーション変更指示").Delete
+                On Error GoTo 0
+
+                Dim wsPanelSM As Worksheet
+                On Error Resume Next
+                Set wsPanelSM = ThisWorkbook.Sheets("操作パネル")
+                On Error GoTo 0
+                If Not wsPanelSM Is Nothing Then
+                    Set wsOutSM = ThisWorkbook.Sheets.Add(Before:=wsPanelSM)
+                Else
+                    Set wsOutSM = Sheets.Add
+                End If
+                wsOutSM.Name = "同号機分散ロケーション変更指示"
+
+                wsOutSM.Columns("F:F").NumberFormat = "@"
+                wsOutSM.Columns("I:I").NumberFormat = "@"
+                wsOutSM.Columns("M:M").NumberFormat = "@"
+
+                wsOutSM.Range("A1:M1").Merge
+                wsOutSM.Cells(1, 1).Value = "【同号機分散ロケーション変更指示(同号機内・対面を除くペアのみ・入替候補" & maxSwapRows & "件)】"
+                wsOutSM.Cells(1, 1).Font.Bold = True: wsOutSM.Cells(1, 1).Font.Size = 14
+                wsOutSM.Cells(1, 1).HorizontalAlignment = xlLeft
+
+                wsOutSM.Range("A2:M2").Merge
+                wsOutSM.Cells(2, 1).Value = "同一号機内で同時ピッキングされている組み合わせを対象に、別ゾーンへ分散させる入替案です(対面(異なる号機)のペアは対象外)。奇数機番合計ヒット数: " & _
+                    Format(oddTotalStart, "0") & " → " & Format(oddTotalSM, "0") & _
+                    "　／　偶数機番合計ヒット数: " & Format(evenTotalStart, "0") & " → " & Format(evenTotalSM, "0")
+                wsOutSM.Cells(2, 1).HorizontalAlignment = xlLeft
+
+                wsOutSM.Range("A4:M4").Value = Array("ゾーン", "区分", "編成内共起回数", "【起点品】(動かさない)", "起点品コード", "起点ロケーション", "【交換品】(こちらを動かす)", "交換品コード", "交換元ロケーション", "交換方向", "【交換対象品】(別ゾーンの低頻度品)", "交換対象品コード", "交換先ロケーション")
+                wsOutSM.Range("A5").Resize(outCntSM, 13).Value = outArrSM
+
+                wsOutSM.Range("A4:M4").Interior.Color = RGB(230, 245, 225)
+                wsOutSM.Range("A4:M4").Font.Bold = True
+                wsOutSM.Columns("A:M").AutoFit
+            End If
+        End If
+
+        ' 同号機分散の均衡化スコア(0～100、100が完全均衡)。上のセクション7で独立に再計算したoddTotalSM/evenTotalSMを使う
+        Dim balanceScoreBeforeSM As Double, balanceScoreAfterSM As Double
+        If (oddTotalStart + evenTotalStart) > 0 Then
+            balanceScoreBeforeSM = 100 * (1 - Abs(oddTotalStart - evenTotalStart) / (oddTotalStart + evenTotalStart))
+        Else
+            balanceScoreBeforeSM = 100
+        End If
+        If (oddTotalSM + evenTotalSM) > 0 Then
+            balanceScoreAfterSM = 100 * (1 - Abs(oddTotalSM - evenTotalSM) / (oddTotalSM + evenTotalSM))
+        Else
+            balanceScoreAfterSM = 100
+        End If
+
         ' KPI記録:AB稼働率スコア(機番回数比の目標比率実績値と、今回ファイル集計結果との近さ)
         Dim abRatioScore As Variant: abRatioScore = ""
         Dim abRatioScoreNote As String: abRatioScoreNote = ""
@@ -549,7 +750,7 @@ Sub OptimizeABFormationFlow()
             End If
         End If
 
-        ' KPI記録:AB得意先スコア(理論値:全体の回数上位900アイテムの回数比率／実績値:AB番機の実回数比率)
+        ' KPI記録:AB得意先スコア(理論値:全体の回数上位abSlotCount件(AB間口数)の回数比率／実績値:AB番機の実回数比率)
         Dim abOccupancyScore As Variant: abOccupancyScore = ""
         Dim abTheoreticalRatioOut As Variant: abTheoreticalRatioOut = ""
         Dim abActualRatioOut As Variant: abActualRatioOut = ""
@@ -569,11 +770,11 @@ Sub OptimizeABFormationFlow()
             Dim allN As Long: allN = ar - 1
 
             Dim topSum As Double
-            If allN >= 900 Then
-                ' 回数の多い順に並べ替えて、ちょうど上位900件だけ合計する
-                ' (LARGE+SUMIF(">=")式だと同着タイのロケーションが全部含まれてしまい、900件を超えて合計されることがあるため補正)
+            If allN >= abSlotCount Then
+                ' 回数の多い順に並べ替えて、ちょうど上位abSlotCount件(AB間口数)だけ合計する
+                ' (LARGE+SUMIF(">=")式だと同着タイのロケーションが全部含まれてしまい、間口数を超えて合計されることがあるため補正)
                 wsTempAll.Range("A1:A" & allN).Sort Key1:=wsTempAll.Range("A1"), Order1:=xlDescending, Header:=xlNo
-                topSum = Application.WorksheetFunction.Sum(wsTempAll.Range("A1:A900"))
+                topSum = Application.WorksheetFunction.Sum(wsTempAll.Range("A1:A" & abSlotCount))
             Else
                 topSum = grandTotal
             End If
@@ -635,10 +836,21 @@ Sub OptimizeABFormationFlow()
         Else
             reportDate = DateSerial(Year(latestFileDate), Month(latestFileDate), Day(latestFileDate))
         End If
-        On Error Resume Next
-        ' Module7が無いブックでもコンパイルエラーにならないよう、Application.Runで実行時に解決する
-        Application.Run "Module7.LogFormationScore", oddTotalStart, evenTotalStart, oddTotal, evenTotal, crossFaceScore, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
-        On Error GoTo 0
+        ' 奇数機番・偶数機番の均衡化スコア(0～100、100が完全均衡)を変更前・変更後それぞれ算出する
+        Dim balanceScoreBefore As Double, balanceScoreAfter As Double
+        If (oddTotalStart + evenTotalStart) > 0 Then
+            balanceScoreBefore = 100 * (1 - Abs(oddTotalStart - evenTotalStart) / (oddTotalStart + evenTotalStart))
+        Else
+            balanceScoreBefore = 100
+        End If
+        If (oddTotal + evenTotal) > 0 Then
+            balanceScoreAfter = 100 * (1 - Abs(oddTotal - evenTotal) / (oddTotal + evenTotal))
+        Else
+            balanceScoreAfter = 100
+        End If
+
+        ' 「AB編成KPI」シートに実施日ごと1行で記録する(同日なら上書き)
+        Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore, balanceScoreBefore, balanceScoreAfter, balanceScoreBeforeSM, balanceScoreAfterSM)
 
         Dim completeMsg As String
         completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
@@ -905,11 +1117,11 @@ Sub EnsureOperationPanelSheet()
         "同時ピッキングの集中を緩和し、機番間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
         "【使い方】" & vbCrLf & _
         "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
-        "②ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
-        "③品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
-        "④「AB編成動線最適化」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
+        "②品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
+        "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
+        "④「AB編成動線最適化」「同号機分散ロケーション変更指示」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
-        "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番などは「設定」シートで変更できます" & _
+        "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番・AB間口数などは「設定」シートで変更できます" & _
         "(シートが無ければ実行時に自動作成されます)。"
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
@@ -922,6 +1134,76 @@ Sub EnsureOperationPanelSheet()
     btn.Characters.Text = "AB編成動線最適化を実行"
     btn.Font.Size = 12
     btn.Font.Bold = True
+End Sub
+
+' ----------------------------------------------------
+' AB編成KPI(実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコアの履歴)
+' ----------------------------------------------------
+
+' 「AB編成KPI」シートが無ければ見出し行だけを用意して自動生成する
+Sub EnsureKPISheet()
+    Dim wsKPI As Worksheet
+    On Error Resume Next
+    Set wsKPI = ThisWorkbook.Sheets("AB編成KPI")
+    On Error GoTo 0
+    If Not wsKPI Is Nothing Then Exit Sub
+
+    Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+    wsKPI.Name = "AB編成KPI"
+
+    wsKPI.Range("A1:H1").Merge
+    wsKPI.Range("A1").Value = "【AB編成 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
+    wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
+
+    wsKPI.Range("A3:H3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア", "均衡化スコア(変更前)", "均衡化スコア(変更後)", "同号機分散均衡化スコア(変更前)", "同号機分散均衡化スコア(変更後)")
+    wsKPI.Range("A3:H3").Interior.Color = RGB(220, 230, 255)
+    wsKPI.Range("A3:H3").Font.Bold = True
+
+    wsKPI.Columns("A:A").ColumnWidth = 12
+    wsKPI.Columns("B:H").ColumnWidth = 20
+    wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
+    wsKPI.Columns("B:C").NumberFormat = "0.0%" ' 上限比率・実績比率は0～1の割合値で渡ってくる
+    wsKPI.Columns("D:H").NumberFormat = "0.0"  ' 回避スコア・均衡化スコアは0～100点
+End Sub
+
+' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア(変更前後)・
+' 同号機分散均衡化スコア(変更前後)を「AB編成KPI」シートに記録する。
+' 同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
+' abTheoreticalRatio:全体の回数上位abSlotCount件(AB間口数)が占める比率(AB管理の理論上の上限)
+' abActualRatio:AB番機内の実回数が全体に占める比率(実績)
+' crossFaceScoreVal:同一機番・対面での同時ピッキングを理論上の最小までどれだけ避けられているかのスコア(0～100、高いほど良い)
+' balanceScoreBefore/After:奇数機番・偶数機番の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。
+'   変更前(スワップ適用前)と変更後(適用後)を並べて記録する(AB編成動線最適化の入替案適用時)
+' balanceScoreBeforeSM/AfterSM:同上だが、同号機分散ロケーション変更指示の入替案を適用した場合の均衡化スコア
+Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant, balanceScoreBefore As Variant, balanceScoreAfter As Variant, balanceScoreBeforeSM As Variant, balanceScoreAfterSM As Variant)
+    Dim wsKPI As Worksheet
+    On Error Resume Next
+    Set wsKPI = ThisWorkbook.Sheets("AB編成KPI")
+    On Error GoTo 0
+    If wsKPI Is Nothing Then Exit Sub
+
+    Dim lastRow As Long: lastRow = wsKPI.Cells(wsKPI.Rows.Count, "A").End(xlUp).Row
+    Dim targetRow As Long: targetRow = 0
+    Dim r As Long
+    For r = 4 To lastRow
+        If wsKPI.Cells(r, 1).Value = reportDate Then
+            targetRow = r
+            Exit For
+        End If
+    Next r
+    If targetRow = 0 Then
+        targetRow = lastRow + 1
+        If targetRow < 4 Then targetRow = 4
+    End If
+
+    wsKPI.Cells(targetRow, 1).Value = reportDate
+    wsKPI.Cells(targetRow, 2).Value = abTheoreticalRatio
+    wsKPI.Cells(targetRow, 3).Value = abActualRatio
+    wsKPI.Cells(targetRow, 4).Value = crossFaceScoreVal
+    wsKPI.Cells(targetRow, 5).Value = balanceScoreBefore
+    wsKPI.Cells(targetRow, 6).Value = balanceScoreAfter
+    wsKPI.Cells(targetRow, 7).Value = balanceScoreBeforeSM
+    wsKPI.Cells(targetRow, 8).Value = balanceScoreAfterSM
 End Sub
 
 ' ----------------------------------------------------
@@ -992,10 +1274,14 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K6").Value = "最大機番"
     wsSet.Range("K6").Font.Bold = True
     wsSet.Range("L6").Value = 46 ' 拠点のラック総数(最大の機番)。この番号までを集計・スワップ対象にする
+
+    wsSet.Range("K7").Value = "AB間口数"
+    wsSet.Range("K7").Font.Bold = True
+    wsSet.Range("L7").Value = 900 ' ABの総間口数。AB得意先スコアの理論値(回数上位◯件)算出に使う
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef maxMachNum As Long)
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef maxMachNum As Long, ByRef abSlotCount As Long)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locDanFrom(1 To 1)
@@ -1005,6 +1291,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ratioSheetName = "機番回数比"
     maxSwapRows = 15
     maxMachNum = 46
+    abSlotCount = 900
 
     Dim wsSet As Worksheet
     On Error Resume Next
@@ -1023,6 +1310,11 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ' 最大機番(L6)。1以上の数値が入っていればそれを使う(拠点のラック総数に合わせる)
     If IsNumeric(wsSet.Range("L6").Value) Then
         If CLng(wsSet.Range("L6").Value) >= 1 Then maxMachNum = CLng(wsSet.Range("L6").Value)
+    End If
+
+    ' AB間口数(L7)。1以上の数値が入っていればそれを使う
+    If IsNumeric(wsSet.Range("L7").Value) Then
+        If CLng(wsSet.Range("L7").Value) >= 1 Then abSlotCount = CLng(wsSet.Range("L7").Value)
     End If
 
     ' 除外機番リスト(A列、5行目以降)
