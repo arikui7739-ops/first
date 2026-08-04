@@ -28,7 +28,7 @@ Sub OptimizeABFormationFlow()
 
     ' 拠点カスタマイズ設定:除外機番・除外ロケーション・除外品コードを「設定」シートから読み込む
     Dim dictExcludedMach As Object: Set dictExcludedMach = CreateObject("Scripting.Dictionary") ' スワップ対象外にする機番
-    Dim excludedLocMach() As Long, excludedLocFrom() As Long, excludedLocTo() As Long
+    Dim excludedLocMach() As Long, excludedLocDanFrom() As Long, excludedLocDanTo() As Long, excludedLocColFrom() As Long, excludedLocColTo() As Long
     Dim excludedLocCount As Long: excludedLocCount = 0
     Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary") ' 全ての集計・スワップ対象から除外する品コード
 
@@ -61,7 +61,7 @@ Sub OptimizeABFormationFlow()
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows)
 
     ' 1. ファイル選択(複数選択・全ファイル形式)
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -146,7 +146,7 @@ Sub OptimizeABFormationFlow()
                         ' AB稼働率スコア用:全ゾーン(機番の範囲を問わず)のヒット数を集計(実在番のみ対象)
                         ' 除外ロケーション(常時使用の固定スロットなど)がデータに混ざっていると全体回数が水増しされ、
                         '   理論比率・実績比率とも本来の値からズレるため、拠点設定に応じて除外する
-                        If mach > 0 And Not itemCodeExcluded And Not IsExcludedLocation(mach, retsu, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount) Then
+                        If mach > 0 And Not itemCodeExcluded And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
                             Dim allLocKey As String: allLocKey = "M" & Format(mach, "000") & Format(dan, "00") & Format(retsu, "00")
                             dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
                         End If
@@ -156,7 +156,7 @@ Sub OptimizeABFormationFlow()
                             Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
 
                             ' ヒートマップ用:除外機番も含めた全AB番号(除外ロケーション・除外品コードのみ除く)でゾーン・面情報を記録
-                            If Not itemCodeExcluded And Not IsExcludedLocation(mach, retsu, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount) Then
+                            If Not itemCodeExcluded And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
                                 dictItemZoneAll(locKey) = zoneNum
                                 dictItemMachAll(locKey) = mach
                                 currentFormationItemsAll(locKey) = 1
@@ -494,7 +494,7 @@ Sub OptimizeABFormationFlow()
         Set wsRatio3 = ActiveWorkbook.Sheets(ratioSheetName)
         On Error GoTo 0
         If wsRatio3 Is Nothing Then
-            abRatioScoreNote = "「" & ratioSheetName & "」シートが見つからないため、AB稼働率スコアは算出されていません(「設定」シートJ4でシート名を確認してください)"
+            abRatioScoreNote = "「" & ratioSheetName & "」シートが見つからないため、AB稼働率スコアは算出されていません(「設定」シートL4でシート名を確認してください)"
         Else
             Dim machHit(1 To 46) As Double, machTarget(1 To 46) As Double
             Dim hk As Variant
@@ -797,16 +797,16 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Columns("A:A").ColumnWidth = 10  ' 除外機番
     wsSet.Columns("B:B").ColumnWidth = 3   ' 区切り
-    wsSet.Columns("C:E").ColumnWidth = 8   ' 除外ロケーション(機番/列From/列To)
-    wsSet.Columns("F:F").ColumnWidth = 3   ' 区切り
-    wsSet.Columns("G:G").ColumnWidth = 14  ' 除外品コード
-    wsSet.Columns("G:G").NumberFormat = "@" ' 品コードは先頭0落ち・数値化を防ぐため文字列扱いにする
+    wsSet.Columns("C:G").ColumnWidth = 8   ' 除外ロケーション(機番/段From/段To/列From/列To)
     wsSet.Columns("H:H").ColumnWidth = 3   ' 区切り
-    wsSet.Columns("I:I").ColumnWidth = 20  ' シート名設定ラベル
-    wsSet.Columns("J:J").ColumnWidth = 16  ' シート名設定値
+    wsSet.Columns("I:I").ColumnWidth = 14  ' 除外品コード
+    wsSet.Columns("I:I").NumberFormat = "@" ' 品コードは先頭0落ち・数値化を防ぐため文字列扱いにする
+    wsSet.Columns("J:J").ColumnWidth = 3   ' 区切り
+    wsSet.Columns("K:K").ColumnWidth = 20  ' シート名設定ラベル
+    wsSet.Columns("L:L").ColumnWidth = 16  ' シート名設定値
 
-    wsSet.Range("A1:G1").Merge
-    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×列の範囲で稼働率・ヒートマップ集計から除外(列From/Toを空欄にするとその機番全体を除外)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
+    wsSet.Range("A1:I1").Merge
+    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲で稼働率・ヒートマップ集計から除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
     wsSet.Range("A1").Font.Bold = True
     wsSet.Range("A1").WrapText = True
     wsSet.Range("A1").VerticalAlignment = xlTop
@@ -823,33 +823,35 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("C3").Value = "■除外ロケーション"
     wsSet.Range("C3").Font.Bold = True
-    wsSet.Range("C4").Value = "機番": wsSet.Range("D4").Value = "列From": wsSet.Range("E4").Value = "列To"
-    wsSet.Range("C4:E4").Font.Bold = True
-    wsSet.Range("C5").Value = 1: wsSet.Range("D5").Value = 6: wsSet.Range("E5").Value = 14
-    wsSet.Range("C6").Value = 2: wsSet.Range("D6").Value = 6: wsSet.Range("E6").Value = 14
+    wsSet.Range("C4").Value = "機番": wsSet.Range("D4").Value = "段From": wsSet.Range("E4").Value = "段To": wsSet.Range("F4").Value = "列From": wsSet.Range("G4").Value = "列To"
+    wsSet.Range("C4:G4").Font.Bold = True
+    wsSet.Range("C5").Value = 1: wsSet.Range("F5").Value = 6: wsSet.Range("G5").Value = 14 ' 段From/Toは空欄=全段
+    wsSet.Range("C6").Value = 2: wsSet.Range("F6").Value = 6: wsSet.Range("G6").Value = 14
 
-    wsSet.Range("G3").Value = "■除外品コード"
-    wsSet.Range("G3").Font.Bold = True
-    wsSet.Range("G4").Value = "品コード"
-    wsSet.Range("G4").Font.Bold = True
-
-    wsSet.Range("I3").Value = "■シート名設定"
+    wsSet.Range("I3").Value = "■除外品コード"
     wsSet.Range("I3").Font.Bold = True
-    wsSet.Range("I4").Value = "機番回数比シート名"
+    wsSet.Range("I4").Value = "品コード"
     wsSet.Range("I4").Font.Bold = True
-    wsSet.Range("J4").Value = "機番回数比" ' AB稼働率スコアの目標比率を読むシート名。拠点によって名前が違う場合はここを書き換える
 
-    wsSet.Range("I5").Value = "入替候補件数"
-    wsSet.Range("I5").Font.Bold = True
-    wsSet.Range("J5").Value = 15 ' 「AB編成動線最適化」に出力する入替候補の最大行数
+    wsSet.Range("K3").Value = "■シート名設定"
+    wsSet.Range("K3").Font.Bold = True
+    wsSet.Range("K4").Value = "機番回数比シート名"
+    wsSet.Range("K4").Font.Bold = True
+    wsSet.Range("L4").Value = "機番回数比" ' AB稼働率スコアの目標比率を読むシート名。拠点によって名前が違う場合はここを書き換える
+
+    wsSet.Range("K5").Value = "入替候補件数"
+    wsSet.Range("K5").Font.Bold = True
+    wsSet.Range("L5").Value = 15 ' 「AB編成動線最適化」に出力する入替候補の最大行数
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数設定を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long)
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long)
     locCount = 0
     ReDim locMach(1 To 1)
-    ReDim locFrom(1 To 1)
-    ReDim locTo(1 To 1)
+    ReDim locDanFrom(1 To 1)
+    ReDim locDanTo(1 To 1)
+    ReDim locColFrom(1 To 1)
+    ReDim locColTo(1 To 1)
     ratioSheetName = "機番回数比"
     maxSwapRows = 15
 
@@ -859,12 +861,12 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     On Error GoTo 0
     If wsSet Is Nothing Then Exit Sub
 
-    ' 機番回数比シート名(J4)。空欄ならデフォルト名のまま
-    If Trim(CStr(wsSet.Range("J4").Value)) <> "" Then ratioSheetName = Trim(CStr(wsSet.Range("J4").Value))
+    ' 機番回数比シート名(L4)。空欄ならデフォルト名のまま
+    If Trim(CStr(wsSet.Range("L4").Value)) <> "" Then ratioSheetName = Trim(CStr(wsSet.Range("L4").Value))
 
-    ' 入替候補件数(J5)。1以上の数値が入っていればそれを使う
-    If IsNumeric(wsSet.Range("J5").Value) Then
-        If CLng(wsSet.Range("J5").Value) >= 1 Then maxSwapRows = CLng(wsSet.Range("J5").Value)
+    ' 入替候補件数(L5)。1以上の数値が入っていればそれを使う
+    If IsNumeric(wsSet.Range("L5").Value) Then
+        If CLng(wsSet.Range("L5").Value) >= 1 Then maxSwapRows = CLng(wsSet.Range("L5").Value)
     End If
 
     ' 除外機番リスト(A列、5行目以降)
@@ -876,41 +878,45 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
         End If
     Next rA
 
-    ' 除外ロケーションリスト(C:E列、5行目以降)
+    ' 除外ロケーションリスト(C:G列=機番/段From/段To/列From/列To、5行目以降)
     Dim lastC As Long: lastC = wsSet.Cells(wsSet.Rows.Count, "C").End(xlUp).Row
     If lastC >= 5 Then
         ReDim locMach(1 To lastC - 4)
-        ReDim locFrom(1 To lastC - 4)
-        ReDim locTo(1 To lastC - 4)
+        ReDim locDanFrom(1 To lastC - 4)
+        ReDim locDanTo(1 To lastC - 4)
+        ReDim locColFrom(1 To lastC - 4)
+        ReDim locColTo(1 To lastC - 4)
         Dim rC As Long
         For rC = 5 To lastC
             If IsNumeric(wsSet.Cells(rC, 3).Value) And Trim(CStr(wsSet.Cells(rC, 3).Value)) <> "" Then
                 locCount = locCount + 1
                 locMach(locCount) = CLng(wsSet.Cells(rC, 3).Value)
-                locFrom(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 4).Value), CLng(wsSet.Cells(rC, 4).Value), 0)
-                locTo(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 5).Value), CLng(wsSet.Cells(rC, 5).Value), 0)
+                locDanFrom(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 4).Value), CLng(wsSet.Cells(rC, 4).Value), 0)
+                locDanTo(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 5).Value), CLng(wsSet.Cells(rC, 5).Value), 0)
+                locColFrom(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 6).Value), CLng(wsSet.Cells(rC, 6).Value), 0)
+                locColTo(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 7).Value), CLng(wsSet.Cells(rC, 7).Value), 0)
             End If
         Next rC
     End If
 
-    ' 除外品コードリスト(G列、5行目以降)
-    Dim lastG As Long: lastG = wsSet.Cells(wsSet.Rows.Count, "G").End(xlUp).Row
-    Dim rG As Long
-    For rG = 5 To lastG
-        Dim codeStr As String: codeStr = Trim(CStr(wsSet.Cells(rG, 7).Value))
+    ' 除外品コードリスト(I列、5行目以降)
+    Dim lastI As Long: lastI = wsSet.Cells(wsSet.Rows.Count, "I").End(xlUp).Row
+    Dim rI As Long
+    For rI = 5 To lastI
+        Dim codeStr As String: codeStr = Trim(CStr(wsSet.Cells(rI, 9).Value))
         If codeStr <> "" Then dictExcludedItemCode(codeStr) = True
-    Next rG
+    Next rI
 End Sub
 
-' 指定の機番・列が「除外ロケーション」設定に該当するか判定する(列From/Toが両方0ならその機番は全列を除外)
-Function IsExcludedLocation(mach As Integer, col As Integer, locMach() As Long, locFrom() As Long, locTo() As Long, locCount As Long) As Boolean
+' 指定の機番・段・列が「除外ロケーション」設定に該当するか判定する(段From/To・列From/Toはそれぞれ両方0なら「全段」「全列」の意味になる)
+Function IsExcludedLocation(mach As Integer, dan As Integer, col As Integer, locMach() As Long, locDanFrom() As Long, locDanTo() As Long, locColFrom() As Long, locColTo() As Long, locCount As Long) As Boolean
     Dim i As Long
     For i = 1 To locCount
         If locMach(i) = mach Then
-            If locFrom(i) = 0 And locTo(i) = 0 Then
-                IsExcludedLocation = True
-                Exit Function
-            ElseIf col >= locFrom(i) And col <= locTo(i) Then
+            Dim danMatch As Boolean, colMatch As Boolean
+            danMatch = (locDanFrom(i) = 0 And locDanTo(i) = 0) Or (dan >= locDanFrom(i) And dan <= locDanTo(i))
+            colMatch = (locColFrom(i) = 0 And locColTo(i) = 0) Or (col >= locColFrom(i) And col <= locColTo(i))
+            If danMatch And colMatch Then
                 IsExcludedLocation = True
                 Exit Function
             End If
