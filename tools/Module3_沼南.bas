@@ -60,6 +60,9 @@ Sub OptimizeABFormationFlow()
     ' 0.4 「操作パネル」シート(説明・実行ボタン)が無ければ自動生成する
     Call EnsureOperationPanelSheet
 
+    ' 0.45 「AB編成KPI」シート(実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア)が無ければ自動生成する
+    Call EnsureKPISheet
+
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
@@ -639,10 +642,8 @@ Sub OptimizeABFormationFlow()
         Else
             reportDate = DateSerial(Year(latestFileDate), Month(latestFileDate), Day(latestFileDate))
         End If
-        On Error Resume Next
-        ' Module7が無いブックでもコンパイルエラーにならないよう、Application.Runで実行時に解決する
-        Application.Run "Module7.LogFormationScore", oddTotalStart, evenTotalStart, oddTotal, evenTotal, crossFaceScore, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
-        On Error GoTo 0
+        ' 「AB編成KPI」シートに実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコアを1行追記する
+        Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore)
 
         Dim completeMsg As String
         completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
@@ -918,6 +919,56 @@ Sub EnsureOperationPanelSheet()
     btn.Characters.Text = "AB編成動線最適化を実行"
     btn.Font.Size = 12
     btn.Font.Bold = True
+End Sub
+
+' ----------------------------------------------------
+' AB編成KPI(実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコアの履歴)
+' ----------------------------------------------------
+
+' 「AB編成KPI」シートが無ければ見出し行だけを用意して自動生成する
+Sub EnsureKPISheet()
+    Dim wsKPI As Worksheet
+    On Error Resume Next
+    Set wsKPI = ThisWorkbook.Sheets("AB編成KPI")
+    On Error GoTo 0
+    If Not wsKPI Is Nothing Then Exit Sub
+
+    Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+    wsKPI.Name = "AB編成KPI"
+
+    wsKPI.Range("A1:D1").Merge
+    wsKPI.Range("A1").Value = "【AB編成 KPI推移】マクロを実行するたびに1行ずつ記録されます"
+    wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
+
+    wsKPI.Range("A3:D3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア")
+    wsKPI.Range("A3:D3").Interior.Color = RGB(220, 230, 255)
+    wsKPI.Range("A3:D3").Font.Bold = True
+
+    wsKPI.Columns("A:A").ColumnWidth = 12
+    wsKPI.Columns("B:D").ColumnWidth = 20
+    wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
+    wsKPI.Columns("B:C").NumberFormat = "0.0%" ' 上限比率・実績比率は0～1の割合値で渡ってくる
+    wsKPI.Columns("D:D").NumberFormat = "0.0"  ' 回避スコアは0～100点
+End Sub
+
+' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコアを「AB編成KPI」シートに1行追記する
+' abTheoreticalRatio:全体の回数上位900アイテムが占める比率(AB管理の理論上の上限)
+' abActualRatio:ABブロック内の実回数が全体に占める比率(実績)
+' crossFaceScoreVal:同号機・対面での同時ピッキングを理論上の最小までどれだけ避けられているかのスコア(0～100、高いほど良い)
+Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant)
+    Dim wsKPI As Worksheet
+    On Error Resume Next
+    Set wsKPI = ThisWorkbook.Sheets("AB編成KPI")
+    On Error GoTo 0
+    If wsKPI Is Nothing Then Exit Sub
+
+    Dim nextRow As Long: nextRow = wsKPI.Cells(wsKPI.Rows.Count, "A").End(xlUp).Row + 1
+    If nextRow < 4 Then nextRow = 4
+
+    wsKPI.Cells(nextRow, 1).Value = reportDate
+    wsKPI.Cells(nextRow, 2).Value = abTheoreticalRatio
+    wsKPI.Cells(nextRow, 3).Value = abActualRatio
+    wsKPI.Cells(nextRow, 4).Value = crossFaceScoreVal
 End Sub
 
 ' ----------------------------------------------------
