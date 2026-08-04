@@ -162,7 +162,7 @@ Sub OptimizeABFormationFlow()
                                 currentFormationItemsAll(locKey) = 1
                             End If
 
-                            If Not itemCodeExcluded And Not IsExcludedSlot3(dictExcludedMach, mach) Then
+                            If Not itemCodeExcluded And Not IsExcludedSlot3(dictExcludedMach, mach) And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
                                 dictItemLoc(locKey) = mach & "-" & Format(dan, "00") & "-" & Format(retsu, "00")
                                 dictItemMach(locKey) = mach
                                 dictItemZone(locKey) = zoneNum
@@ -806,7 +806,7 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Columns("L:L").ColumnWidth = 16  ' シート名設定値
 
     wsSet.Range("A1:I1").Merge
-    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲で稼働率・ヒートマップ集計から除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
+    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
     wsSet.Range("A1").Font.Bold = True
     wsSet.Range("A1").WrapText = True
     wsSet.Range("A1").VerticalAlignment = xlTop
