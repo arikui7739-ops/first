@@ -843,16 +843,18 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
             Line Input #fileNo2, firstLine
 
             If Left(firstLine, 1) = "B" Then
-                ' ロケーションマスタ:E行の2～7文字目=機番段列(6桁)、8～13文字目=品コード(6桁)
+                ' ロケーションマスタ:E行の2～7文字目=機番段列(6桁)、8～15文字目=品コード(8桁固定域。
+                ' 6桁品コードは末尾2文字が空白埋め、8桁品コード(28xxxxxx等)はそのまま埋まる)
                 Do While Not EOF(fileNo2)
                     Line Input #fileNo2, textLine2
-                    If Left(textLine2, 1) = "E" And Len(textLine2) >= 13 Then
+                    If Left(textLine2, 1) = "E" And Len(textLine2) >= 15 Then
                         Dim locStr As String: locStr = Mid(textLine2, 2, 6)
-                        Dim itemCode6 As String: itemCode6 = Mid(textLine2, 8, 6)
-                        If IsNumeric(locStr) And IsNumeric(itemCode6) Then
+                        Dim itemCodeStr As String: itemCodeStr = Trim(Mid(textLine2, 8, 8))
+                        If IsNumeric(locStr) And itemCodeStr <> "" And IsNumeric(itemCodeStr) Then
                             Dim mLocCode As String
                             mLocCode = CStr(CLng(Mid(locStr, 1, 2)) * 10000& + CLng(Mid(locStr, 3, 2)) * 100& + CLng(Mid(locStr, 5, 2)))
-                            dictLocCode(mLocCode) = CLng(itemCode6)
+                            ' 先頭ゼロが意味を持つ品コードのため、数値変換せず文字列のまま保持する
+                            dictLocCode(mLocCode) = itemCodeStr
                         End If
                     End If
                 Loop
@@ -871,14 +873,20 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
         End If
     Next fIdx2
 
-    ' 品名マスタが読み込めた場合、ロケーション→品コードの対応(CF・ロケーションマスタ双方)を使って品名を上書きする
+    ' 品名マスタが読み込めた場合、ロケーション→品コードの対応(CF・ロケーションマスタ双方)を使って品名を上書きする。
+    ' dictLocCodeの値はCF由来なら数値、ロケーションマスタ由来なら文字列と型が揃っていないため、
+    ' 元の桁数のまま/先頭ゼロを1つ追加/先頭ゼロを1つ除去、の3通りで品名マスタと照合する
     If dictItemNameByCode.Count > 0 Then
         Dim locKeyIter As Variant
         For Each locKeyIter In dictLocCode.Keys
-            If IsNumeric(dictLocCode(locKeyIter)) Then
-                Dim codeForName As String: codeForName = Format(CLng(dictLocCode(locKeyIter)), "0000000")
-                If dictItemNameByCode.Exists(codeForName) Then
-                    dictLocName(locKeyIter) = dictItemNameByCode(codeForName)
+            Dim rawCode As String: rawCode = Trim(CStr(dictLocCode(locKeyIter)))
+            If rawCode <> "" Then
+                If dictItemNameByCode.Exists(rawCode) Then
+                    dictLocName(locKeyIter) = dictItemNameByCode(rawCode)
+                ElseIf dictItemNameByCode.Exists("0" & rawCode) Then
+                    dictLocName(locKeyIter) = dictItemNameByCode("0" & rawCode)
+                ElseIf Left(rawCode, 1) = "0" And dictItemNameByCode.Exists(Mid(rawCode, 2)) Then
+                    dictLocName(locKeyIter) = dictItemNameByCode(Mid(rawCode, 2))
                 End If
             End If
         Next locKeyIter
