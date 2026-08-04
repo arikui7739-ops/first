@@ -480,7 +480,7 @@ Sub OptimizeABFormationFlow()
 
         For zi = 1 To maxZoneNum
             Dim heatCol As Long: heatCol = HEAT_COL_OFFSET + zi
-            wsOut.Cells(heatLabelRow, heatCol).Value = (zi * 2 - 1) & "&" & (zi * 2)
+            wsOut.Cells(heatLabelRow, heatCol).Value = GetMachPairLabel(zi, abBlockFrom, abBlockTo, abBlockCount)
             wsOut.Cells(heatLabelRow, heatCol).Font.Size = 8
             wsOut.Cells(heatLabelRow, heatCol).HorizontalAlignment = xlCenter
 
@@ -1227,6 +1227,24 @@ Function GetTotalZoneCount(abBlockFrom() As Long, abBlockTo() As Long, abBlockCo
         total = total + Int((abBlockTo(bi) - abBlockFrom(bi)) / 2) + 1
     Next bi
     GetTotalZoneCount = total
+End Function
+
+' ゾーン番号から、そのゾーンが指す実際の機番ペア("37&38"など)のラベルを求める(ComputeZoneForMachの逆変換)。
+' ブロックをまたいでゾーン番号が連番になっているため、単純な(zi*2-1)&(zi*2)では2つ目以降のブロックがズレる
+Function GetMachPairLabel(zoneNum As Long, abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long) As String
+    Dim zoneBase As Long: zoneBase = 0
+    Dim bi As Long
+    For bi = 1 To abBlockCount
+        Dim zonesInBlock As Long: zonesInBlock = Int((abBlockTo(bi) - abBlockFrom(bi)) / 2) + 1
+        If zoneNum >= zoneBase + 1 And zoneNum <= zoneBase + zonesInBlock Then
+            Dim localIdx As Long: localIdx = zoneNum - zoneBase
+            Dim mach1 As Long: mach1 = abBlockFrom(bi) + (localIdx - 1) * 2
+            GetMachPairLabel = mach1 & "&" & (mach1 + 1)
+            Exit Function
+        End If
+        zoneBase = zoneBase + zonesInBlock
+    Next bi
+    GetMachPairLabel = CStr(zoneNum) ' 該当ブロックが見つからない場合のフォールバック
 End Function
 
 ' 全ABブロックのうち最も大きい終了機番(machHit/machTarget配列のサイズ確保に使う)
