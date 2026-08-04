@@ -26,10 +26,11 @@ Sub OptimizeABFormationFlow()
     Dim dictCrossFaceAll As Object: Set dictCrossFaceAll = CreateObject("Scripting.Dictionary")
     Dim currentFormationItemsAll As Object: Set currentFormationItemsAll = CreateObject("Scripting.Dictionary")
 
-    ' 拠点カスタマイズ設定:除外機番・除外ロケーションを「設定」シートから読み込む
+    ' 拠点カスタマイズ設定:除外機番・除外ロケーション・除外品コードを「設定」シートから読み込む
     Dim dictExcludedMach As Object: Set dictExcludedMach = CreateObject("Scripting.Dictionary") ' スワップ対象外にする機番
     Dim excludedLocMach() As Long, excludedLocFrom() As Long, excludedLocTo() As Long
     Dim excludedLocCount As Long: excludedLocCount = 0
+    Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary") ' 全ての集計・スワップ対象から除外する品コード
 
     ' 0. CFシート読込 ロケーション番号と品名・品コードの対応表を作る
     Dim dictLocName As Object: Set dictLocName = CreateObject("Scripting.Dictionary")
@@ -58,7 +59,7 @@ Sub OptimizeABFormationFlow()
 
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount, dictExcludedItemCode)
 
     ' 1. ファイル選択(複数選択・全ファイル形式)
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -136,10 +137,14 @@ Sub OptimizeABFormationFlow()
                         dan = Val(Mid(rec, 3, 2))
                         retsu = Val(Mid(rec, 5, 2))
 
+                        ' 除外品コード(設定シートで指定)に該当する品は、格納場所を問わず全ての集計・スワップ対象から除く
+                        Dim itemCodeExcluded As Boolean
+                        itemCodeExcluded = IsExcludedItemCode(dictLocCode, dictExcludedItemCode, mach, dan, retsu)
+
                         ' AB稼働率スコア用:全ゾーン(機番の範囲を問わず)のヒット数を集計(実在番のみ対象)
                         ' 除外ロケーション(常時使用の固定スロットなど)がデータに混ざっていると全体回数が水増しされ、
                         '   理論比率・実績比率とも本来の値からズレるため、拠点設定に応じて除外する
-                        If mach > 0 And Not IsExcludedLocation(mach, retsu, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount) Then
+                        If mach > 0 And Not itemCodeExcluded And Not IsExcludedLocation(mach, retsu, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount) Then
                             Dim allLocKey As String: allLocKey = "M" & Format(mach, "000") & Format(dan, "00") & Format(retsu, "00")
                             dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
                         End If
@@ -148,14 +153,14 @@ Sub OptimizeABFormationFlow()
                             Dim zoneNum As Integer: zoneNum = Int((mach - 1) / 2) + 1 ' 1&2番機は1、3&4番機は2 … 45&46番機は23
                             Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
 
-                            ' ヒートマップ用:除外機番も含めた全AB番号(除外ロケーションのみ除く)でゾーン・面情報を記録
-                            If Not IsExcludedLocation(mach, retsu, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount) Then
+                            ' ヒートマップ用:除外機番も含めた全AB番号(除外ロケーション・除外品コードのみ除く)でゾーン・面情報を記録
+                            If Not itemCodeExcluded And Not IsExcludedLocation(mach, retsu, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount) Then
                                 dictItemZoneAll(locKey) = zoneNum
                                 dictItemMachAll(locKey) = mach
                                 currentFormationItemsAll(locKey) = 1
                             End If
 
-                            If Not IsExcludedSlot3(dictExcludedMach, mach) Then
+                            If Not itemCodeExcluded And Not IsExcludedSlot3(dictExcludedMach, mach) Then
                                 dictItemLoc(locKey) = mach & "-" & Format(dan, "00") & "-" & Format(retsu, "00")
                                 dictItemMach(locKey) = mach
                                 dictItemZone(locKey) = zoneNum
@@ -942,6 +947,7 @@ End Function
 
 ' 「設定」シートが無い場合、これまでの固定値(機番1～4を完全除外、1・2番機の列6～14を除外)を
 ' 初期値として自動生成する。他拠点ではこのシートの値を書き換えるだけで動作を変更できる。
+' 列幅は用途ごとに固定値で設定する(説明文の長さに引っ張られて横に広がらないようにするため、AutoFitは使わない)。
 Sub EnsureExclusionSettingsSheet()
     Dim wsSet As Worksheet
     On Error Resume Next
@@ -952,27 +958,44 @@ Sub EnsureExclusionSettingsSheet()
     Set wsSet = ThisWorkbook.Sheets.Add
     wsSet.Name = "設定"
 
-    wsSet.Range("A1").Value = "【除外機番】スワップ対象・AB得意先使用比率スコアの対象から完全に除外する機番(サイズが異なる品を格納している機番などを指定)"
-    wsSet.Range("A1:B1").Font.Bold = True
-    wsSet.Range("A2").Value = "機番"
-    wsSet.Range("A2").Font.Bold = True
-    wsSet.Range("A3").Value = 1
-    wsSet.Range("A4").Value = 2
-    wsSet.Range("A5").Value = 3
-    wsSet.Range("A6").Value = 4
+    wsSet.Columns("A:A").ColumnWidth = 10  ' 除外機番
+    wsSet.Columns("B:B").ColumnWidth = 3   ' 区切り
+    wsSet.Columns("C:E").ColumnWidth = 8   ' 除外ロケーション(機番/列From/列To)
+    wsSet.Columns("F:F").ColumnWidth = 3   ' 区切り
+    wsSet.Columns("G:G").ColumnWidth = 14  ' 除外品コード
+    wsSet.Columns("G:G").NumberFormat = "@" ' 品コードは先頭0落ち・数値化を防ぐため文字列扱いにする
 
-    wsSet.Range("D1").Value = "【除外ロケーション】常時使用スロット(パディング)など、AB稼働率スコア・ヒートマップ集計から除外する機番×列範囲。列From/Toを空欄にするとその機番全体を除外"
-    wsSet.Range("D1:F1").Font.Bold = True
-    wsSet.Range("D2").Value = "機番": wsSet.Range("E2").Value = "列From": wsSet.Range("F2").Value = "列To"
-    wsSet.Range("D2:F2").Font.Bold = True
-    wsSet.Range("D3").Value = 1: wsSet.Range("E3").Value = 6: wsSet.Range("F3").Value = 14
-    wsSet.Range("D4").Value = 2: wsSet.Range("E4").Value = 6: wsSet.Range("F4").Value = 14
+    wsSet.Range("A1:G1").Merge
+    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×列の範囲で稼働率・ヒートマップ集計から除外(列From/Toを空欄にするとその機番全体を除外)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
+    wsSet.Range("A1").Font.Bold = True
+    wsSet.Range("A1").WrapText = True
+    wsSet.Range("A1").VerticalAlignment = xlTop
+    wsSet.Rows(1).RowHeight = 60
 
-    wsSet.Columns("A:F").AutoFit
+    wsSet.Range("A3").Value = "■除外機番"
+    wsSet.Range("A3").Font.Bold = True
+    wsSet.Range("A4").Value = "機番"
+    wsSet.Range("A4").Font.Bold = True
+    wsSet.Range("A5").Value = 1
+    wsSet.Range("A6").Value = 2
+    wsSet.Range("A7").Value = 3
+    wsSet.Range("A8").Value = 4
+
+    wsSet.Range("C3").Value = "■除外ロケーション"
+    wsSet.Range("C3").Font.Bold = True
+    wsSet.Range("C4").Value = "機番": wsSet.Range("D4").Value = "列From": wsSet.Range("E4").Value = "列To"
+    wsSet.Range("C4:E4").Font.Bold = True
+    wsSet.Range("C5").Value = 1: wsSet.Range("D5").Value = 6: wsSet.Range("E5").Value = 14
+    wsSet.Range("C6").Value = 2: wsSet.Range("D6").Value = 6: wsSet.Range("E6").Value = 14
+
+    wsSet.Range("G3").Value = "■除外品コード"
+    wsSet.Range("G3").Font.Bold = True
+    wsSet.Range("G4").Value = "品コード"
+    wsSet.Range("G4").Font.Bold = True
 End Sub
 
-' 「設定」シートの内容を読み込み、除外機番の辞書と除外ロケーションの配列を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long)
+' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列を組み立てる
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locFrom(1 To 1)
@@ -984,31 +1007,39 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     On Error GoTo 0
     If wsSet Is Nothing Then Exit Sub
 
-    ' 除外機番リスト(A列、3行目以降)
+    ' 除外機番リスト(A列、5行目以降)
     Dim lastA As Long: lastA = wsSet.Cells(wsSet.Rows.Count, "A").End(xlUp).Row
     Dim rA As Long
-    For rA = 3 To lastA
+    For rA = 5 To lastA
         If IsNumeric(wsSet.Cells(rA, 1).Value) And Trim(CStr(wsSet.Cells(rA, 1).Value)) <> "" Then
             dictExcludedMach(CStr(CLng(wsSet.Cells(rA, 1).Value))) = True
         End If
     Next rA
 
-    ' 除外ロケーションリスト(D:F列、3行目以降)
-    Dim lastD As Long: lastD = wsSet.Cells(wsSet.Rows.Count, "D").End(xlUp).Row
-    If lastD >= 3 Then
-        ReDim locMach(1 To lastD - 2)
-        ReDim locFrom(1 To lastD - 2)
-        ReDim locTo(1 To lastD - 2)
-        Dim rD As Long
-        For rD = 3 To lastD
-            If IsNumeric(wsSet.Cells(rD, 4).Value) And Trim(CStr(wsSet.Cells(rD, 4).Value)) <> "" Then
+    ' 除外ロケーションリスト(C:E列、5行目以降)
+    Dim lastC As Long: lastC = wsSet.Cells(wsSet.Rows.Count, "C").End(xlUp).Row
+    If lastC >= 5 Then
+        ReDim locMach(1 To lastC - 4)
+        ReDim locFrom(1 To lastC - 4)
+        ReDim locTo(1 To lastC - 4)
+        Dim rC As Long
+        For rC = 5 To lastC
+            If IsNumeric(wsSet.Cells(rC, 3).Value) And Trim(CStr(wsSet.Cells(rC, 3).Value)) <> "" Then
                 locCount = locCount + 1
-                locMach(locCount) = CLng(wsSet.Cells(rD, 4).Value)
-                locFrom(locCount) = IIf(IsNumeric(wsSet.Cells(rD, 5).Value), CLng(wsSet.Cells(rD, 5).Value), 0)
-                locTo(locCount) = IIf(IsNumeric(wsSet.Cells(rD, 6).Value), CLng(wsSet.Cells(rD, 6).Value), 0)
+                locMach(locCount) = CLng(wsSet.Cells(rC, 3).Value)
+                locFrom(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 4).Value), CLng(wsSet.Cells(rC, 4).Value), 0)
+                locTo(locCount) = IIf(IsNumeric(wsSet.Cells(rC, 5).Value), CLng(wsSet.Cells(rC, 5).Value), 0)
             End If
-        Next rD
+        Next rC
     End If
+
+    ' 除外品コードリスト(G列、5行目以降)
+    Dim lastG As Long: lastG = wsSet.Cells(wsSet.Rows.Count, "G").End(xlUp).Row
+    Dim rG As Long
+    For rG = 5 To lastG
+        Dim codeStr As String: codeStr = Trim(CStr(wsSet.Cells(rG, 7).Value))
+        If codeStr <> "" Then dictExcludedItemCode(codeStr) = True
+    Next rG
 End Sub
 
 ' 指定の機番・列が「除外ロケーション」設定に該当するか判定する(列From/Toが両方0ならその機番は全列を除外)
@@ -1031,6 +1062,15 @@ End Function
 ' 指定の機番が「除外機番」設定に該当するか判定する(1～4番機のような、サイズが異なる品を格納する機番など)
 Function IsExcludedSlot3(dictExcludedMach As Object, mach As Integer) As Boolean
     IsExcludedSlot3 = dictExcludedMach.Exists(CStr(mach))
+End Function
+
+' 指定の機番・段・列にある品が「除外品コード」設定に該当するか判定する(CFシートのロケーション⇔品コード対応表を使って引く)
+Function IsExcludedItemCode(dictLocCode As Object, dictExcludedItemCode As Object, ByVal mach As Integer, ByVal dan As Integer, ByVal retsu As Integer) As Boolean
+    If dictExcludedItemCode.Count = 0 Then Exit Function
+    Dim locCodeKey As String: locCodeKey = CStr(CLng(mach) * 10000& + CLng(dan) * 100& + CLng(retsu))
+    If dictLocCode.Exists(locCodeKey) Then
+        IsExcludedItemCode = dictExcludedItemCode.Exists(Trim(CStr(dictLocCode(locCodeKey))))
+    End If
 End Function
 
 Function GetLocName3(dictLocName As Object, ByVal mach As Long, locKey As String) As String
