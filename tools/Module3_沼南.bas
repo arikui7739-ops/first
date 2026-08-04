@@ -160,9 +160,9 @@ Sub OptimizeABFormationFlow()
                         itemCodeExcluded = IsExcludedItemCode(dictLocCode, dictExcludedItemCode, mach, dan, retsu)
 
                         ' AB稼働率スコア用:全ゾーン(機番の範囲を問わず)のヒット数を集計(実在番のみ対象)
-                        ' 除外ロケーション(常時使用の固定スロットなど)がデータに混ざっていると全体回数が水増しされ、
-                        '   理論比率・実績比率とも本来の値からズレるため、拠点設定に応じて除外する
-                        If mach > 0 And Not itemCodeExcluded And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
+                        ' AB上限回数比率・AB実績回数比率は倉庫全体の生データで比較する指標のため、
+                        ' 除外機番・除外ロケーション・除外品コードの設定はここでは適用しない
+                        If mach > 0 Then
                             Dim allLocKey As String: allLocKey = "M" & Format(mach, "000") & Format(dan, "00") & Format(retsu, "00")
                             dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
                         End If
