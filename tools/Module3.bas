@@ -59,8 +59,9 @@ Sub OptimizeABFormationFlow()
 
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
+    Dim maxSwapRows As Long: maxSwapRows = 15
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount, dictExcludedItemCode, ratioSheetName)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows)
 
     ' 1. ファイル選択(複数選択・全ファイル形式)
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -280,7 +281,7 @@ Sub OptimizeABFormationFlow()
     Const MAX_PER_ZONE As Integer = 2 ' 同一ゾーンから交換先に採用できる回数の上限
 
     For r = 1 To pCnt
-        If outCnt >= 10 Then Exit For ' 入替候補(スコア順)は10件まで
+        If outCnt >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
 
         Dim aItem As String: aItem = CStr(pairArr(r, 5))
         Dim mItem As String: mItem = CStr(pairArr(r, 7))
@@ -381,6 +382,7 @@ Sub OptimizeABFormationFlow()
         Dim wsOut As Worksheet
         On Error Resume Next
         Sheets("AB編成動線最適化").Delete
+        Sheets("対面化促進スワップ指示").Delete ' 旧バージョンで作成された出力シートが残っていれば削除する
         On Error GoTo 0
 
         ' 「操作パネル」シートがあればその左隣に配置する
@@ -401,7 +403,7 @@ Sub OptimizeABFormationFlow()
 
         ' タイトル・サマリー行はA:M列で結合し、A列だけが横に伸びないようにする
         wsOut.Range("A1:M1").Merge
-        wsOut.Cells(1, 1).Value = "【AB編成動線最適化(入替候補10件)】"
+        wsOut.Cells(1, 1).Value = "【AB編成動線最適化(入替候補" & maxSwapRows & "件)】"
         wsOut.Cells(1, 1).Font.Bold = True: wsOut.Cells(1, 1).Font.Size = 14
         wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
@@ -483,186 +485,6 @@ Sub OptimizeABFormationFlow()
             wsOut.Cells(heatPctRow, heatCol).HorizontalAlignment = xlCenter
         Next zi
         wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatPctRow, heatLastCol)).Borders.LineStyle = xlContinuous
-
-        ' 7. 対面化促進専用指示(対面ペアのみを対象にする。同面同士のヒットは考慮しない)
-        Dim maxCrossPairs As Long: maxCrossPairs = dictCrossFace.Count
-        If maxCrossPairs > 0 Then
-            Dim crossPairArr() As Variant
-            ReDim crossPairArr(1 To maxCrossPairs, 1 To 6)
-            Dim cpCnt As Long: cpCnt = 0
-            Dim cpKey As Variant
-            For Each cpKey In dictCrossFace.Keys
-                Dim cpItems() As String: cpItems = Split(CStr(cpKey), ",")
-                Dim cpItemA As String: cpItemA = cpItems(0)
-                Dim cpItemB As String: cpItemB = cpItems(1)
-                cpCnt = cpCnt + 1
-                Dim cpCoCount As Long: cpCoCount = dictPairs(cpKey)
-                Dim cpAnchor As String, cpMover As String
-                If dictItemHit(cpItemA) >= dictItemHit(cpItemB) Then
-                    cpAnchor = cpItemA: cpMover = cpItemB
-                Else
-                    cpAnchor = cpItemB: cpMover = cpItemA
-                End If
-                crossPairArr(cpCnt, 1) = dictItemZone(cpAnchor)
-                crossPairArr(cpCnt, 2) = cpCoCount
-                crossPairArr(cpCnt, 3) = cpAnchor
-                crossPairArr(cpCnt, 4) = dictItemLoc(cpAnchor)
-                crossPairArr(cpCnt, 5) = cpMover
-                crossPairArr(cpCnt, 6) = dictItemLoc(cpMover)
-            Next cpKey
-
-            ' 編成内共起回数(列2)の降順でソート
-            Dim wsTempCross As Worksheet: Set wsTempCross = Sheets.Add
-            wsTempCross.Columns("D:F").NumberFormat = "@"
-            wsTempCross.Range("A1").Resize(cpCnt, 6).Value = crossPairArr
-            wsTempCross.Sort.SortFields.Clear
-            wsTempCross.Sort.SortFields.Add Key:=wsTempCross.Range("B1:B" & cpCnt), Order:=xlDescending
-            wsTempCross.Sort.SetRange wsTempCross.Range("A1:F" & cpCnt)
-            wsTempCross.Sort.Apply
-            crossPairArr = wsTempCross.Range("A1:F" & cpCnt).Value
-            wsTempCross.Delete
-
-            ' 入替案の決定(このシート専用に、奇数/偶数の合計を独立して再計算する)
-            Dim oddTotalCross As Double, evenTotalCross As Double
-            oddTotalCross = oddTotalStart: evenTotalCross = evenTotalStart
-            Dim outArrCross() As Variant
-            ReDim outArrCross(1 To cpCnt, 1 To 12)
-            Dim outCntCross As Long: outCntCross = 0
-            Dim dictSwappedCross As Object: Set dictSwappedCross = CreateObject("Scripting.Dictionary")
-            Dim dictZoneUsedCountCross As Object: Set dictZoneUsedCountCross = CreateObject("Scripting.Dictionary")
-
-            Dim rc As Long
-            For rc = 1 To cpCnt
-                If outCntCross >= 10 Then Exit For ' 編成内共起回数上位10件まで
-
-                Dim aItemC As String: aItemC = CStr(crossPairArr(rc, 3))
-                Dim mItemC As String: mItemC = CStr(crossPairArr(rc, 5))
-
-                If Not dictSwappedCross.Exists(aItemC) And Not dictSwappedCross.Exists(mItemC) Then
-                    Dim anchorZoneC As Integer: anchorZoneC = dictItemZone(aItemC)
-                    Dim targetItemC As String: targetItemC = ""
-
-                    Dim moverSideC As Integer: moverSideC = dictItemMach(mItemC) Mod 2
-                    Dim desiredSideC As Integer
-                    If Abs(oddTotalCross - evenTotalCross) <= 0.001 Then
-                        desiredSideC = -1
-                    ElseIf (oddTotalCross > evenTotalCross And moverSideC = 1) Or (evenTotalCross > oddTotalCross And moverSideC = 0) Then
-                        desiredSideC = 1 - moverSideC
-                    Else
-                        desiredSideC = moverSideC
-                    End If
-
-                    Dim passNumC As Integer
-                    For passNumC = 1 To 3
-                        If targetItemC <> "" Then Exit For
-                        Dim zKeyC As Variant
-                        For Each zKeyC In zoneItems.Keys
-                            If CInt(zKeyC) <> anchorZoneC Then
-                                Dim zoneUsedC As Integer
-                                If dictZoneUsedCountCross.Exists(zKeyC) Then zoneUsedC = dictZoneUsedCountCross(zKeyC) Else zoneUsedC = 0
-                                If passNumC = 3 Or zoneUsedC < MAX_PER_ZONE Then
-                                    Dim candidateC As Variant
-                                    For Each candidateC In zoneItems(zKeyC)
-                                        Dim candStrC As String: candStrC = CStr(candidateC)
-                                        If candStrC <> aItemC And candStrC <> mItemC And Not dictSwappedCross.Exists(candStrC) Then
-                                            If passNumC = 1 And desiredSideC <> -1 Then
-                                                If dictItemMach(candStrC) Mod 2 = desiredSideC Then
-                                                    targetItemC = candStrC
-                                                    Exit For
-                                                End If
-                                            Else
-                                                targetItemC = candStrC
-                                                Exit For
-                                            End If
-                                        End If
-                                    Next candidateC
-                                End If
-                            End If
-                            If targetItemC <> "" Then Exit For
-                        Next zKeyC
-                    Next passNumC
-
-                    If targetItemC <> "" Then
-                        Dim usedZoneKeyC As String: usedZoneKeyC = CStr(dictItemZone(targetItemC))
-                        If dictZoneUsedCountCross.Exists(usedZoneKeyC) Then
-                            dictZoneUsedCountCross(usedZoneKeyC) = dictZoneUsedCountCross(usedZoneKeyC) + 1
-                        Else
-                            dictZoneUsedCountCross.Add usedZoneKeyC, 1
-                        End If
-
-                        Dim targetSideC As Integer: targetSideC = dictItemMach(targetItemC) Mod 2
-                        If moverSideC <> targetSideC Then
-                            Dim moverHitsC As Double: moverHitsC = dictItemHit(mItemC)
-                            Dim targetHitsC As Double: targetHitsC = dictItemHit(targetItemC)
-                            If moverSideC = 1 Then
-                                oddTotalCross = oddTotalCross - moverHitsC + targetHitsC
-                                evenTotalCross = evenTotalCross - targetHitsC + moverHitsC
-                            Else
-                                evenTotalCross = evenTotalCross - moverHitsC + targetHitsC
-                                oddTotalCross = oddTotalCross - targetHitsC + moverHitsC
-                            End If
-                        End If
-
-                        outCntCross = outCntCross + 1
-                        outArrCross(outCntCross, 1) = anchorZoneC
-                        outArrCross(outCntCross, 2) = crossPairArr(rc, 2) ' 編成内共起回数
-                        outArrCross(outCntCross, 3) = GetLocName3(dictLocName, dictItemMach(aItemC), aItemC)
-                        outArrCross(outCntCross, 4) = GetLocCode3(dictLocCode, dictItemMach(aItemC), aItemC)
-                        outArrCross(outCntCross, 5) = dictItemLoc(aItemC)
-                        outArrCross(outCntCross, 6) = GetLocName3(dictLocName, dictItemMach(mItemC), mItemC)
-                        outArrCross(outCntCross, 7) = GetLocCode3(dictLocCode, dictItemMach(mItemC), mItemC)
-                        outArrCross(outCntCross, 8) = dictItemLoc(mItemC)
-                        outArrCross(outCntCross, 9) = "⇔"
-                        outArrCross(outCntCross, 10) = GetLocName3(dictLocName, dictItemMach(targetItemC), targetItemC)
-                        outArrCross(outCntCross, 11) = GetLocCode3(dictLocCode, dictItemMach(targetItemC), targetItemC)
-                        outArrCross(outCntCross, 12) = dictItemLoc(targetItemC)
-
-                        dictSwappedCross(mItemC) = True
-                        dictSwappedCross(targetItemC) = True
-                    End If
-                End If
-            Next rc
-
-            If outCntCross > 0 Then
-                Dim wsOutCross As Worksheet
-                On Error Resume Next
-                Sheets("対面化促進スワップ指示").Delete
-                On Error GoTo 0
-
-                Dim wsPanelCross As Worksheet
-                On Error Resume Next
-                Set wsPanelCross = ThisWorkbook.Sheets("操作パネル")
-                On Error GoTo 0
-                If Not wsPanelCross Is Nothing Then
-                    Set wsOutCross = ThisWorkbook.Sheets.Add(Before:=wsPanelCross)
-                Else
-                    Set wsOutCross = Sheets.Add
-                End If
-                wsOutCross.Name = "対面化促進スワップ指示"
-
-                wsOutCross.Columns("E:E").NumberFormat = "@"
-                wsOutCross.Columns("H:H").NumberFormat = "@"
-                wsOutCross.Columns("L:L").NumberFormat = "@"
-
-                wsOutCross.Range("A1:L1").Merge
-                wsOutCross.Cells(1, 1).Value = "【対面化促進スワップ指示(対面ペアのみ・同面同士のヒットは対象外・上位10件)】"
-                wsOutCross.Cells(1, 1).Font.Bold = True: wsOutCross.Cells(1, 1).Font.Size = 14
-                wsOutCross.Cells(1, 1).HorizontalAlignment = xlLeft
-
-                wsOutCross.Range("A2:L2").Merge
-                wsOutCross.Cells(2, 1).Value = "対面ヒットのみを対象に検討します(同面の同時ヒットは無視)。奇数機番合計ヒット数: " & _
-                    Format(oddTotalStart, "0") & " → " & Format(oddTotalCross, "0") & _
-                    "　／　偶数機番合計ヒット数: " & Format(evenTotalStart, "0") & " → " & Format(evenTotalCross, "0")
-                wsOutCross.Cells(2, 1).HorizontalAlignment = xlLeft
-
-                wsOutCross.Range("A4:L4").Value = Array("ゾーン", "編成内共起回数(対面)", "【起点品】(動かさない)", "起点品コード", "起点ロケーション", "【交換品】(こちらを動かす)", "交換品コード", "交換元ロケーション", "交換方向", "【交換対象品】(別ゾーンの低頻度品)", "交換対象品コード", "交換先ロケーション")
-                wsOutCross.Range("A5").Resize(outCntCross, 12).Value = outArrCross
-
-                wsOutCross.Range("A4:L4").Interior.Color = RGB(255, 230, 220)
-                wsOutCross.Range("A4:L4").Font.Bold = True
-                wsOutCross.Columns("A:L").AutoFit
-            End If
-        End If
 
         ' KPI記録:AB稼働率スコア(機番回数比の目標比率実績値と、今回ファイル集計結果との近さ)
         Dim abRatioScore As Variant: abRatioScore = ""
@@ -1016,15 +838,20 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("I4").Value = "機番回数比シート名"
     wsSet.Range("I4").Font.Bold = True
     wsSet.Range("J4").Value = "機番回数比" ' AB稼働率スコアの目標比率を読むシート名。拠点によって名前が違う場合はここを書き換える
+
+    wsSet.Range("I5").Value = "入替候補件数"
+    wsSet.Range("I5").Font.Bold = True
+    wsSet.Range("J5").Value = 15 ' 「AB編成動線最適化」に出力する入替候補の最大行数
 End Sub
 
-' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名設定を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String)
+' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数設定を組み立てる
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locFrom(1 To 1)
     ReDim locTo(1 To 1)
     ratioSheetName = "機番回数比"
+    maxSwapRows = 15
 
     Dim wsSet As Worksheet
     On Error Resume Next
@@ -1034,6 +861,11 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
 
     ' 機番回数比シート名(J4)。空欄ならデフォルト名のまま
     If Trim(CStr(wsSet.Range("J4").Value)) <> "" Then ratioSheetName = Trim(CStr(wsSet.Range("J4").Value))
+
+    ' 入替候補件数(J5)。1以上の数値が入っていればそれを使う
+    If IsNumeric(wsSet.Range("J5").Value) Then
+        If CLng(wsSet.Range("J5").Value) >= 1 Then maxSwapRows = CLng(wsSet.Range("J5").Value)
+    End If
 
     ' 除外機番リスト(A列、5行目以降)
     Dim lastA As Long: lastA = wsSet.Cells(wsSet.Rows.Count, "A").End(xlUp).Row
