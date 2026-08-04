@@ -64,7 +64,7 @@ Sub OptimizeABFormationFlow()
     Call EnsureKPISheet
 
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
-    Dim ratioSheetName As String: ratioSheetName = "機番回数比"
+    Dim ratioSheetName As String: ratioSheetName = "号機回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
     Dim abSlotCount As Long: abSlotCount = 850 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
     ' ABブロック:AB編成のゾーン対象とする号機範囲(複数ブロック可)。既定は沼南の実際のラック配置(1～30、37～50)
@@ -503,7 +503,7 @@ Sub OptimizeABFormationFlow()
         Next zi
         wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatPctRow, heatLastCol)).Borders.LineStyle = xlContinuous
 
-        ' KPI記録:AB稼働率スコア(機番回数比の目標比率実績値と、今回ファイル集計結果との近さ)
+        ' KPI記録:AB稼働率スコア(号機回数比の目標比率実績値と、今回ファイル集計結果との近さ)
         Dim abRatioScore As Variant: abRatioScore = ""
         Dim abRatioScoreNote As String: abRatioScoreNote = ""
         Dim wsRatio3 As Worksheet
@@ -928,7 +928,7 @@ Sub EnsureOperationPanelSheet()
         "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
         "④「AB編成動線最適化」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
-        "除外号機・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・ABブロックなどは「設定」シートで変更できます" & _
+        "除外号機・除外ロケーション・除外品コード・号機回数比シート名・入替候補件数・ABブロックなどは「設定」シートで変更できます" & _
         "(シートが無ければ実行時に自動作成されます)。"
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
@@ -1062,9 +1062,9 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("K3").Value = "■シート名設定"
     wsSet.Range("K3").Font.Bold = True
-    wsSet.Range("K4").Value = "機番回数比シート名"
+    wsSet.Range("K4").Value = "号機回数比シート名"
     wsSet.Range("K4").Font.Bold = True
-    wsSet.Range("L4").Value = "機番回数比" ' AB稼働率スコアの目標比率を読むシート名。拠点によって名前が違う場合はここを書き換える
+    wsSet.Range("L4").Value = "号機回数比" ' AB稼働率スコアの目標比率を読むシート名。拠点によって名前が違う場合はここを書き換える
 
     wsSet.Range("K5").Value = "入替候補件数"
     wsSet.Range("K5").Font.Bold = True
@@ -1092,7 +1092,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ReDim locDanTo(1 To 1)
     ReDim locColFrom(1 To 1)
     ReDim locColTo(1 To 1)
-    ratioSheetName = "機番回数比"
+    ratioSheetName = "号機回数比"
     maxSwapRows = 15
     abSlotCount = 850
     ' ABブロックの既定値:沼南の実際のラック配置(1～30、37～50)
@@ -1107,7 +1107,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     On Error GoTo 0
     If wsSet Is Nothing Then Exit Sub
 
-    ' 機番回数比シート名(L4)。空欄ならデフォルト名のまま
+    ' 号機回数比シート名(L4)。空欄ならデフォルト名のまま
     If Trim(CStr(wsSet.Range("L4").Value)) <> "" Then ratioSheetName = Trim(CStr(wsSet.Range("L4").Value))
 
     ' 入替候補件数(L5)。1以上の数値が入っていればそれを使う
