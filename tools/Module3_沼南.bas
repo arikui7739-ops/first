@@ -84,7 +84,9 @@ Sub OptimizeABFormationFlow()
     With fd
         .Title = "ピッキング実績ファイルを選択(複数選択可)"
         .Filters.Clear
+        .Filters.Add "ピッキング実績ファイル (S71*)", "S71*.*"
         .Filters.Add "すべてのファイル", "*.*"
+        .FilterIndex = 1
         .AllowMultiSelect = True
         If .Show = False Then Exit Sub
     End With
@@ -825,7 +827,11 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     With fd2
         .Title = "品名マスタ・ロケーションマスタを選択(任意・複数選択可。使わない場合はキャンセルでCFシートのみ使用)"
         .Filters.Clear
+        .Filters.Add "品名マスタ + ロケーションマスタ (S01*/S74*)", "S01*.*;S74*.*"
+        .Filters.Add "品名マスタ (S01*)", "S01*.*"
+        .Filters.Add "ロケーションマスタ (S74*)", "S74*.*"
         .Filters.Add "すべてのファイル", "*.*"
+        .FilterIndex = 1
         .AllowMultiSelect = True
         If .Show = False Then Exit Sub
     End With
