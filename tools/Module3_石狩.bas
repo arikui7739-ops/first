@@ -57,6 +57,9 @@ Sub OptimizeABFormationFlow()
         Next cf
     End If
 
+    ' 0.4 「操作パネル」シート(説明・実行ボタン)が無ければ自動生成する
+    Call EnsureOperationPanelSheet
+
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
@@ -860,6 +863,55 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
             End If
         Next locKeyIter
     End If
+End Sub
+
+' ----------------------------------------------------
+' 操作パネル(マクロの説明・実行ボタン)
+' ----------------------------------------------------
+
+' 「操作パネル」シートが無い場合、マクロの説明と実行ボタンを自動生成する。
+' ブックの先頭シートとして配置し、以降このシートの左隣に各種出力シート(AB編成動線最適化など)が追加されていく。
+Sub EnsureOperationPanelSheet()
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If Not wsPanel Is Nothing Then Exit Sub
+
+    Set wsPanel = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+    wsPanel.Name = "操作パネル"
+
+    wsPanel.Columns("A:A").ColumnWidth = 3
+    wsPanel.Columns("B:H").ColumnWidth = 14
+
+    wsPanel.Range("B2:H2").Merge
+    wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
+    wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
+    wsPanel.Range("B2").HorizontalAlignment = xlLeft
+
+    wsPanel.Range("B4:H16").Merge
+    wsPanel.Range("B4").Value = _
+        "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同時に出庫されやすい商品同士を" & _
+        "近くに配置し直すための入替候補を提案するツールです。" & vbCrLf & vbCrLf & _
+        "【使い方】" & vbCrLf & _
+        "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
+        "②ピッキング実績ファイル(複数選択可)を選ぶ" & vbCrLf & _
+        "③品名マスタ・ロケーションマスタを使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
+        "④「AB編成動線最適化」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
+        "【カスタマイズ】" & vbCrLf & _
+        "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番などは「設定」シートで変更できます" & _
+        "(シートが無ければ実行時に自動作成されます)。"
+    wsPanel.Range("B4").Font.Size = 11
+    wsPanel.Range("B4").WrapText = True
+    wsPanel.Range("B4").VerticalAlignment = xlTop
+    wsPanel.Rows("4:16").RowHeight = 18
+
+    Dim btn As Button
+    Set btn = wsPanel.Buttons.Add(wsPanel.Range("B18").Left, wsPanel.Range("B18").Top, 220, 36)
+    btn.OnAction = "OptimizeABFormationFlow"
+    btn.Characters.Text = "AB編成動線最適化を実行"
+    btn.Font.Size = 12
+    btn.Font.Bold = True
 End Sub
 
 ' ----------------------------------------------------
