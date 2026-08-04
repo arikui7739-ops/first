@@ -642,8 +642,21 @@ Sub OptimizeABFormationFlow()
         Else
             reportDate = DateSerial(Year(latestFileDate), Month(latestFileDate), Day(latestFileDate))
         End If
-        ' 「AB編成KPI」シートに実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコアを1行追記する
-        Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore)
+        ' 奇数機番・偶数機番の均衡化スコア(0～100、100が完全均衡)を変更前・変更後それぞれ算出する
+        Dim balanceScoreBefore As Double, balanceScoreAfter As Double
+        If (oddTotalStart + evenTotalStart) > 0 Then
+            balanceScoreBefore = 100 * (1 - Abs(oddTotalStart - evenTotalStart) / (oddTotalStart + evenTotalStart))
+        Else
+            balanceScoreBefore = 100
+        End If
+        If (oddTotal + evenTotal) > 0 Then
+            balanceScoreAfter = 100 * (1 - Abs(oddTotal - evenTotal) / (oddTotal + evenTotal))
+        Else
+            balanceScoreAfter = 100
+        End If
+
+        ' 「AB編成KPI」シートに実施日ごと1行で記録する(同日なら上書き)
+        Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore, balanceScoreBefore, balanceScoreAfter)
 
         Dim completeMsg As String
         completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
@@ -922,7 +935,7 @@ Sub EnsureOperationPanelSheet()
 End Sub
 
 ' ----------------------------------------------------
-' AB編成KPI(実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコアの履歴)
+' AB編成KPI(実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコアの履歴)
 ' ----------------------------------------------------
 
 ' 「AB編成KPI」シートが無ければ見出し行だけを用意して自動生成する
@@ -936,39 +949,54 @@ Sub EnsureKPISheet()
     Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
     wsKPI.Name = "AB編成KPI"
 
-    wsKPI.Range("A1:D1").Merge
-    wsKPI.Range("A1").Value = "【AB編成 KPI推移】マクロを実行するたびに1行ずつ記録されます"
+    wsKPI.Range("A1:F1").Merge
+    wsKPI.Range("A1").Value = "【AB編成 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
     wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
 
-    wsKPI.Range("A3:D3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア")
-    wsKPI.Range("A3:D3").Interior.Color = RGB(220, 230, 255)
-    wsKPI.Range("A3:D3").Font.Bold = True
+    wsKPI.Range("A3:F3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア", "均衡化スコア(変更前)", "均衡化スコア(変更後)")
+    wsKPI.Range("A3:F3").Interior.Color = RGB(220, 230, 255)
+    wsKPI.Range("A3:F3").Font.Bold = True
 
     wsKPI.Columns("A:A").ColumnWidth = 12
-    wsKPI.Columns("B:D").ColumnWidth = 20
+    wsKPI.Columns("B:F").ColumnWidth = 20
     wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
     wsKPI.Columns("B:C").NumberFormat = "0.0%" ' 上限比率・実績比率は0～1の割合値で渡ってくる
-    wsKPI.Columns("D:D").NumberFormat = "0.0"  ' 回避スコアは0～100点
+    wsKPI.Columns("D:F").NumberFormat = "0.0"  ' 回避スコア・均衡化スコアは0～100点
 End Sub
 
-' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコアを「AB編成KPI」シートに1行追記する
+' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア(変更前後)を
+' 「AB編成KPI」シートに記録する。同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
 ' abTheoreticalRatio:全体の回数上位900アイテムが占める比率(AB管理の理論上の上限)
 ' abActualRatio:ABブロック内の実回数が全体に占める比率(実績)
 ' crossFaceScoreVal:同号機・対面での同時ピッキングを理論上の最小までどれだけ避けられているかのスコア(0～100、高いほど良い)
-Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant)
+' balanceScoreBefore/After:奇数機番・偶数機番の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。変更前(スワップ適用前)と変更後(適用後)を並べて記録する
+Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant, balanceScoreBefore As Variant, balanceScoreAfter As Variant)
     Dim wsKPI As Worksheet
     On Error Resume Next
     Set wsKPI = ThisWorkbook.Sheets("AB編成KPI")
     On Error GoTo 0
     If wsKPI Is Nothing Then Exit Sub
 
-    Dim nextRow As Long: nextRow = wsKPI.Cells(wsKPI.Rows.Count, "A").End(xlUp).Row + 1
-    If nextRow < 4 Then nextRow = 4
+    Dim lastRow As Long: lastRow = wsKPI.Cells(wsKPI.Rows.Count, "A").End(xlUp).Row
+    Dim targetRow As Long: targetRow = 0
+    Dim r As Long
+    For r = 4 To lastRow
+        If wsKPI.Cells(r, 1).Value = reportDate Then
+            targetRow = r
+            Exit For
+        End If
+    Next r
+    If targetRow = 0 Then
+        targetRow = lastRow + 1
+        If targetRow < 4 Then targetRow = 4
+    End If
 
-    wsKPI.Cells(nextRow, 1).Value = reportDate
-    wsKPI.Cells(nextRow, 2).Value = abTheoreticalRatio
-    wsKPI.Cells(nextRow, 3).Value = abActualRatio
-    wsKPI.Cells(nextRow, 4).Value = crossFaceScoreVal
+    wsKPI.Cells(targetRow, 1).Value = reportDate
+    wsKPI.Cells(targetRow, 2).Value = abTheoreticalRatio
+    wsKPI.Cells(targetRow, 3).Value = abActualRatio
+    wsKPI.Cells(targetRow, 4).Value = crossFaceScoreVal
+    wsKPI.Cells(targetRow, 5).Value = balanceScoreBefore
+    wsKPI.Cells(targetRow, 6).Value = balanceScoreAfter
 End Sub
 
 ' ----------------------------------------------------
