@@ -503,6 +503,189 @@ Sub OptimizeABFormationFlow()
         Next zi
         wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatPctRow, heatLastCol)).Borders.LineStyle = xlContinuous
 
+        ' 7. 同号機分散ロケーション変更指示(同号機内(対面を除く)ペアのみを対象にする。対面ヒットは対象外)
+        Dim maxSameMachPairs As Long: maxSameMachPairs = dictPairs.Count - dictCrossFace.Count
+        If maxSameMachPairs > 0 Then
+            Dim smPairArr() As Variant
+            ReDim smPairArr(1 To maxSameMachPairs, 1 To 6)
+            Dim smCnt As Long: smCnt = 0
+            Dim smKey As Variant
+            For Each smKey In dictPairs.Keys
+                If Not dictCrossFace.Exists(smKey) Then
+                    Dim smItems() As String: smItems = Split(CStr(smKey), ",")
+                    Dim smItemA As String: smItemA = smItems(0)
+                    Dim smItemB As String: smItemB = smItems(1)
+                    smCnt = smCnt + 1
+                    Dim smCoCount As Long: smCoCount = dictPairs(smKey)
+                    Dim smAnchor As String, smMover As String
+                    If dictItemHit(smItemA) >= dictItemHit(smItemB) Then
+                        smAnchor = smItemA: smMover = smItemB
+                    Else
+                        smAnchor = smItemB: smMover = smItemA
+                    End If
+                    smPairArr(smCnt, 1) = dictItemZone(smAnchor)
+                    smPairArr(smCnt, 2) = smCoCount
+                    smPairArr(smCnt, 3) = smAnchor
+                    smPairArr(smCnt, 4) = dictItemLoc(smAnchor)
+                    smPairArr(smCnt, 5) = smMover
+                    smPairArr(smCnt, 6) = dictItemLoc(smMover)
+                End If
+            Next smKey
+
+            ' 編成内共起回数(列2)の降順でソート
+            Dim wsTempSM As Worksheet: Set wsTempSM = Sheets.Add
+            wsTempSM.Columns("D:F").NumberFormat = "@"
+            wsTempSM.Range("A1").Resize(smCnt, 6).Value = smPairArr
+            wsTempSM.Sort.SortFields.Clear
+            wsTempSM.Sort.SortFields.Add Key:=wsTempSM.Range("B1:B" & smCnt), Order:=xlDescending
+            wsTempSM.Sort.SetRange wsTempSM.Range("A1:F" & smCnt)
+            wsTempSM.Sort.Apply
+            smPairArr = wsTempSM.Range("A1:F" & smCnt).Value
+            wsTempSM.Delete
+
+            ' 入替案の決定(このシート専用に、奇数/偶数の合計を独立して再計算する)
+            Dim oddTotalSM As Double, evenTotalSM As Double
+            oddTotalSM = oddTotalStart: evenTotalSM = evenTotalStart
+            Dim outArrSM() As Variant
+            ReDim outArrSM(1 To smCnt, 1 To 13)
+            Dim outCntSM As Long: outCntSM = 0
+            Dim dictSwappedSM As Object: Set dictSwappedSM = CreateObject("Scripting.Dictionary")
+            Dim dictZoneUsedCountSM As Object: Set dictZoneUsedCountSM = CreateObject("Scripting.Dictionary")
+
+            Dim rsm As Long
+            For rsm = 1 To smCnt
+                If outCntSM >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
+
+                Dim aItemSM As String: aItemSM = CStr(smPairArr(rsm, 3))
+                Dim mItemSM As String: mItemSM = CStr(smPairArr(rsm, 5))
+
+                If Not dictSwappedSM.Exists(aItemSM) And Not dictSwappedSM.Exists(mItemSM) Then
+                    Dim anchorZoneSM As Integer: anchorZoneSM = dictItemZone(aItemSM)
+                    Dim targetItemSM As String: targetItemSM = ""
+
+                    Dim moverSideSM As Integer: moverSideSM = dictItemMach(mItemSM) Mod 2
+                    Dim desiredSideSM As Integer
+                    If Abs(oddTotalSM - evenTotalSM) <= 0.001 Then
+                        desiredSideSM = -1
+                    ElseIf (oddTotalSM > evenTotalSM And moverSideSM = 1) Or (evenTotalSM > oddTotalSM And moverSideSM = 0) Then
+                        desiredSideSM = 1 - moverSideSM
+                    Else
+                        desiredSideSM = moverSideSM
+                    End If
+
+                    Dim passNumSM As Integer
+                    For passNumSM = 1 To 3
+                        If targetItemSM <> "" Then Exit For
+                        Dim zKeySM As Variant
+                        For Each zKeySM In zoneItems.Keys
+                            If CInt(zKeySM) <> anchorZoneSM Then
+                                Dim zoneUsedSM As Integer
+                                If dictZoneUsedCountSM.Exists(zKeySM) Then zoneUsedSM = dictZoneUsedCountSM(zKeySM) Else zoneUsedSM = 0
+                                If passNumSM = 3 Or zoneUsedSM < MAX_PER_ZONE Then
+                                    Dim candidateSM As Variant
+                                    For Each candidateSM In zoneItems(zKeySM)
+                                        Dim candStrSM As String: candStrSM = CStr(candidateSM)
+                                        If candStrSM <> aItemSM And candStrSM <> mItemSM And Not dictSwappedSM.Exists(candStrSM) Then
+                                            If passNumSM = 1 And desiredSideSM <> -1 Then
+                                                If dictItemMach(candStrSM) Mod 2 = desiredSideSM Then
+                                                    targetItemSM = candStrSM
+                                                    Exit For
+                                                End If
+                                            Else
+                                                targetItemSM = candStrSM
+                                                Exit For
+                                            End If
+                                        End If
+                                    Next candidateSM
+                                End If
+                            End If
+                            If targetItemSM <> "" Then Exit For
+                        Next zKeySM
+                    Next passNumSM
+
+                    If targetItemSM <> "" Then
+                        Dim usedZoneKeySM As String: usedZoneKeySM = CStr(dictItemZone(targetItemSM))
+                        If dictZoneUsedCountSM.Exists(usedZoneKeySM) Then
+                            dictZoneUsedCountSM(usedZoneKeySM) = dictZoneUsedCountSM(usedZoneKeySM) + 1
+                        Else
+                            dictZoneUsedCountSM.Add usedZoneKeySM, 1
+                        End If
+
+                        Dim targetSideSM As Integer: targetSideSM = dictItemMach(targetItemSM) Mod 2
+                        If moverSideSM <> targetSideSM Then
+                            Dim moverHitsSM As Double: moverHitsSM = dictItemHit(mItemSM)
+                            Dim targetHitsSM As Double: targetHitsSM = dictItemHit(targetItemSM)
+                            If moverSideSM = 1 Then
+                                oddTotalSM = oddTotalSM - moverHitsSM + targetHitsSM
+                                evenTotalSM = evenTotalSM - targetHitsSM + moverHitsSM
+                            Else
+                                evenTotalSM = evenTotalSM - moverHitsSM + targetHitsSM
+                                oddTotalSM = oddTotalSM - targetHitsSM + moverHitsSM
+                            End If
+                        End If
+
+                        outCntSM = outCntSM + 1
+                        outArrSM(outCntSM, 1) = anchorZoneSM
+                        outArrSM(outCntSM, 2) = dictItemMach(aItemSM) & "号機内"
+                        outArrSM(outCntSM, 3) = smPairArr(rsm, 2) ' 編成内共起回数
+                        outArrSM(outCntSM, 4) = GetLocName3(dictLocName, dictItemMach(aItemSM), aItemSM)
+                        outArrSM(outCntSM, 5) = GetLocCode3(dictLocCode, dictItemMach(aItemSM), aItemSM)
+                        outArrSM(outCntSM, 6) = dictItemLoc(aItemSM)
+                        outArrSM(outCntSM, 7) = GetLocName3(dictLocName, dictItemMach(mItemSM), mItemSM)
+                        outArrSM(outCntSM, 8) = GetLocCode3(dictLocCode, dictItemMach(mItemSM), mItemSM)
+                        outArrSM(outCntSM, 9) = dictItemLoc(mItemSM)
+                        outArrSM(outCntSM, 10) = "⇔"
+                        outArrSM(outCntSM, 11) = GetLocName3(dictLocName, dictItemMach(targetItemSM), targetItemSM)
+                        outArrSM(outCntSM, 12) = GetLocCode3(dictLocCode, dictItemMach(targetItemSM), targetItemSM)
+                        outArrSM(outCntSM, 13) = dictItemLoc(targetItemSM)
+
+                        dictSwappedSM(mItemSM) = True
+                        dictSwappedSM(targetItemSM) = True
+                    End If
+                End If
+            Next rsm
+
+            If outCntSM > 0 Then
+                Dim wsOutSM As Worksheet
+                On Error Resume Next
+                Sheets("同号機分散ロケーション変更指示").Delete
+                On Error GoTo 0
+
+                Dim wsPanelSM As Worksheet
+                On Error Resume Next
+                Set wsPanelSM = ThisWorkbook.Sheets("操作パネル")
+                On Error GoTo 0
+                If Not wsPanelSM Is Nothing Then
+                    Set wsOutSM = ThisWorkbook.Sheets.Add(Before:=wsPanelSM)
+                Else
+                    Set wsOutSM = Sheets.Add
+                End If
+                wsOutSM.Name = "同号機分散ロケーション変更指示"
+
+                wsOutSM.Columns("F:F").NumberFormat = "@"
+                wsOutSM.Columns("I:I").NumberFormat = "@"
+                wsOutSM.Columns("M:M").NumberFormat = "@"
+
+                wsOutSM.Range("A1:M1").Merge
+                wsOutSM.Cells(1, 1).Value = "【同号機分散ロケーション変更指示(同号機内・対面を除くペアのみ・入替候補" & maxSwapRows & "件)】"
+                wsOutSM.Cells(1, 1).Font.Bold = True: wsOutSM.Cells(1, 1).Font.Size = 14
+                wsOutSM.Cells(1, 1).HorizontalAlignment = xlLeft
+
+                wsOutSM.Range("A2:M2").Merge
+                wsOutSM.Cells(2, 1).Value = "同一号機内で同時ピッキングされている組み合わせを対象に、別ゾーンへ分散させる入替案です(対面(異なる号機)のペアは対象外)。奇数号機合計ヒット数: " & _
+                    Format(oddTotalStart, "0") & " → " & Format(oddTotalSM, "0") & _
+                    "　／　偶数号機合計ヒット数: " & Format(evenTotalStart, "0") & " → " & Format(evenTotalSM, "0")
+                wsOutSM.Cells(2, 1).HorizontalAlignment = xlLeft
+
+                wsOutSM.Range("A4:M4").Value = Array("ゾーン", "区分", "編成内共起回数", "【起点品】(動かさない)", "起点品コード", "起点ロケーション", "【交換品】(こちらを動かす)", "交換品コード", "交換元ロケーション", "交換方向", "【交換対象品】(別ゾーンの低頻度品)", "交換対象品コード", "交換先ロケーション")
+                wsOutSM.Range("A5").Resize(outCntSM, 13).Value = outArrSM
+
+                wsOutSM.Range("A4:M4").Interior.Color = RGB(230, 245, 225)
+                wsOutSM.Range("A4:M4").Font.Bold = True
+                wsOutSM.Columns("A:M").AutoFit
+            End If
+        End If
+
         ' KPI記録:AB稼働率スコア(号機回数比の目標比率実績値と、今回ファイル集計結果との近さ)
         Dim abRatioScore As Variant: abRatioScore = ""
         Dim abRatioScoreNote As String: abRatioScoreNote = ""
