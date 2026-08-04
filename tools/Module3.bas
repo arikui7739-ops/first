@@ -60,8 +60,10 @@ Sub OptimizeABFormationFlow()
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
+    Dim maxMachNum As Long: maxMachNum = 46 ' この機番までを集計・スワップ対象の範囲とする(拠点のラック総数に合わせて設定シートで変更可能)
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum)
+    Dim maxZoneNum As Long: maxZoneNum = Int((maxMachNum - 1) / 2) + 1 ' 機番を2台単位で束ねたゾーン数
 
     ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
     Call LoadItemMasterFilesIfSelected(dictLocCode, dictLocName)
@@ -81,7 +83,7 @@ Sub OptimizeABFormationFlow()
     Application.EnableEvents = False
     Application.DisplayAlerts = False
 
-    ' 2. データの読込(H行6件を1編成として区切り、AB(1～46番機、除外設定を反映)を対象に集計)
+    ' 2. データの読込(H行6件を1編成として区切り、AB(1～maxMachNum番機、除外設定を反映)を対象に集計)
     ' 複数編成がファイルをまたがない前提のため、ファイルが変わるたびに前ファイルの端数編成を確定させてリセットする
     Dim fIdx As Long
     Dim latestFileDate As Date: latestFileDate = DateSerial(1900, 1, 1) ' ファイル更新日時(B行から日付が読めない場合のフォールバック)
@@ -154,7 +156,7 @@ Sub OptimizeABFormationFlow()
                             dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
                         End If
 
-                        If mach >= 1 And mach <= 46 Then
+                        If mach >= 1 And mach <= maxMachNum Then
                             Dim zoneNum As Integer: zoneNum = Int((mach - 1) / 2) + 1 ' 1&2番機は1、3&4番機は2 … 45&46番機は23
                             Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
 
@@ -423,16 +425,17 @@ Sub OptimizeABFormationFlow()
         wsOut.Range("A4:M4").Font.Bold = True
         wsOut.Columns("A:M").AutoFit
 
-        ' 対面同士のヒット状況ヒートマップ(1&2番機～45&46番機を機番配置順に23ゾーン表示)
-        ' ※1～4番機はスワップ候補・AB稼働率スコアの対象外だが、ヒートマップは実態を反映するためdictPairsAll(除外ロケーションのみ反映)を使う
-        Dim zoneCrossHit(1 To 23) As Double
-        Dim zoneTotalHit(1 To 23) As Double ' そのゾーンの同面込みヒット数(対面比率(%)の分母)
+        ' 対面同士のヒット状況ヒートマップ(1&2番機～maxMachNum番機を機番配置順にゾーン表示)
+        ' ※除外機番はスワップ候補・AB稼働率スコアの対象外だが、ヒートマップは実態を反映するためdictPairsAll(除外ロケーションのみ反映)を使う
+        Dim zoneCrossHit() As Double, zoneTotalHit() As Double ' zoneTotalHitはそのゾーンの同面込みヒット数(対面比率(%)の分母)
+        ReDim zoneCrossHit(1 To maxZoneNum)
+        ReDim zoneTotalHit(1 To maxZoneNum)
         Dim pk As Variant, pkParts() As String
         For Each pk In dictPairsAll.Keys
             pkParts = Split(CStr(pk), ",")
             If dictItemZoneAll.Exists(pkParts(0)) Then
-                Dim pZone As Integer: pZone = CInt(dictItemZoneAll(pkParts(0)))
-                If pZone >= 1 And pZone <= 23 Then
+                Dim pZone As Long: pZone = CLng(dictItemZoneAll(pkParts(0)))
+                If pZone >= 1 And pZone <= maxZoneNum Then
                     zoneTotalHit(pZone) = zoneTotalHit(pZone) + dictPairsAll(pk)
                     If dictCrossFaceAll.Exists(pk) Then
                         zoneCrossHit(pZone) = zoneCrossHit(pZone) + dictPairsAll(pk)
@@ -442,8 +445,8 @@ Sub OptimizeABFormationFlow()
         Next pk
 
         Dim maxCross As Double: maxCross = 0
-        Dim zi As Integer
-        For zi = 1 To 23
+        Dim zi As Long
+        For zi = 1 To maxZoneNum
             If zoneCrossHit(zi) > maxCross Then maxCross = zoneCrossHit(zi)
         Next zi
 
@@ -455,7 +458,7 @@ Sub OptimizeABFormationFlow()
         ' 本表(A:M)と列幅を揃えると本表側の列幅が崩れるため、O列(15列目)以降の未使用領域にコンパクトな幅で配置する
         Const HEAT_COL_OFFSET As Long = 14 ' 15列目(O)から開始
         Dim heatFirstCol As Long: heatFirstCol = HEAT_COL_OFFSET + 1
-        Dim heatLastCol As Long: heatLastCol = HEAT_COL_OFFSET + 23
+        Dim heatLastCol As Long: heatLastCol = HEAT_COL_OFFSET + maxZoneNum
 
         wsOut.Range(wsOut.Cells(heatTitleRow, heatFirstCol), wsOut.Cells(heatTitleRow, heatLastCol)).Merge
         wsOut.Cells(heatTitleRow, heatFirstCol).Value = "【対面同士のヒット状況(ゾーン別ヒートマップ)】※濃いほど対面での同時出庫(同一編成での共起)が多い。下段はそのゾーン内の同時ヒットのうち対面が占める割合"
@@ -464,7 +467,7 @@ Sub OptimizeABFormationFlow()
 
         wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatLabelRow, heatLastCol)).EntireColumn.ColumnWidth = 6
 
-        For zi = 1 To 23
+        For zi = 1 To maxZoneNum
             Dim heatCol As Long: heatCol = HEAT_COL_OFFSET + zi
             wsOut.Cells(heatLabelRow, heatCol).Value = (zi * 2 - 1) & "&" & (zi * 2)
             wsOut.Cells(heatLabelRow, heatCol).Font.Size = 8
@@ -499,26 +502,28 @@ Sub OptimizeABFormationFlow()
         If wsRatio3 Is Nothing Then
             abRatioScoreNote = "「" & ratioSheetName & "」シートが見つからないため、AB稼働率スコアは算出されていません(「設定」シートL4でシート名を確認してください)"
         Else
-            Dim machHit(1 To 46) As Double, machTarget(1 To 46) As Double
+            Dim machHit() As Double, machTarget() As Double
+            ReDim machHit(1 To maxMachNum)
+            ReDim machTarget(1 To maxMachNum)
             Dim hk As Variant
             For Each hk In dictItemHit.Keys
-                Dim hm As Integer: hm = dictItemMach(hk)
-                If hm >= 1 And hm <= 46 Then machHit(hm) = machHit(hm) + dictItemHit(hk)
+                Dim hm As Long: hm = dictItemMach(hk)
+                If hm >= 1 And hm <= maxMachNum Then machHit(hm) = machHit(hm) + dictItemHit(hk)
             Next hk
 
             Dim rr3 As Long, abLabel3 As String, mNum3 As Integer
-            For rr3 = 3 To 48 ' AB01(1番機)～AB46(46番機)に対応する行
+            For rr3 = 3 To 2 + maxMachNum ' AB01(1番機)～maxMachNum番機に対応する行
                 abLabel3 = Trim(CStr(wsRatio3.Cells(rr3, 1).Value))
                 If abLabel3 Like "AB##" Then
                     mNum3 = CInt(Mid(abLabel3, 3, 2))
-                    If mNum3 >= 1 And mNum3 <= 46 Then machTarget(mNum3) = Val(wsRatio3.Cells(rr3, 5).Value)
+                    If mNum3 >= 1 And mNum3 <= maxMachNum Then machTarget(mNum3) = Val(wsRatio3.Cells(rr3, 5).Value)
                 End If
             Next rr3
 
-            ' 1号機～46号機を対象に、設定シートの除外機番だけを動的に除いて正規化して比較する
-            Dim hitTotal As Double, targetTotal As Double, mIdx As Integer
+            ' 1号機～maxMachNum号機を対象に、設定シートの除外機番だけを動的に除いて正規化して比較する
+            Dim hitTotal As Double, targetTotal As Double, mIdx As Long
             hitTotal = 0: targetTotal = 0
-            For mIdx = 1 To 46
+            For mIdx = 1 To maxMachNum
                 If Not dictExcludedMach.Exists(CStr(mIdx)) Then
                     hitTotal = hitTotal + machHit(mIdx)
                     targetTotal = targetTotal + machTarget(mIdx)
@@ -528,10 +533,10 @@ Sub OptimizeABFormationFlow()
             If hitTotal <= 0 Then
                 abRatioScoreNote = "実績データが除外設定によりすべて対象外のため、AB稼働率スコアは算出されていません"
             ElseIf targetTotal <= 0 Then
-                abRatioScoreNote = "「" & ratioSheetName & "」シートにAB01～AB46の目標比率(A列ラベル・E列数値、3～48行目)が見つからないため、AB稼働率スコアは算出されていません"
+                abRatioScoreNote = "「" & ratioSheetName & "」シートにAB01～AB" & Format(maxMachNum, "00") & "の目標比率(A列ラベル・E列数値、3～" & (2 + maxMachNum) & "行目)が見つからないため、AB稼働率スコアは算出されていません"
             Else
                 Dim sumAbsDiff As Double: sumAbsDiff = 0
-                For mIdx = 1 To 46
+                For mIdx = 1 To maxMachNum
                     If Not dictExcludedMach.Exists(CStr(mIdx)) Then
                         sumAbsDiff = sumAbsDiff + Abs((machHit(mIdx) / hitTotal) - (machTarget(mIdx) / targetTotal))
                     End If
@@ -554,8 +559,8 @@ Sub OptimizeABFormationFlow()
                 Dim hitVal As Double: hitVal = dictAllHit(allKey)
                 wsTempAll.Cells(ar, 1).Value = hitVal
                 grandTotal = grandTotal + hitVal
-                Dim keyMach As Integer: keyMach = CInt(Mid(CStr(allKey), 2, 3))
-                If keyMach >= 1 And keyMach <= 46 Then abActualTotal = abActualTotal + hitVal
+                Dim keyMach As Long: keyMach = CLng(Mid(CStr(allKey), 2, 3))
+                If keyMach >= 1 And keyMach <= maxMachNum Then abActualTotal = abActualTotal + hitVal
                 ar = ar + 1
             Next allKey
             Dim allN As Long: allN = ar - 1
@@ -921,10 +926,14 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K5").Value = "入替候補件数"
     wsSet.Range("K5").Font.Bold = True
     wsSet.Range("L5").Value = 15 ' 「AB編成動線最適化」に出力する入替候補の最大行数
+
+    wsSet.Range("K6").Value = "最大機番"
+    wsSet.Range("K6").Font.Bold = True
+    wsSet.Range("L6").Value = 46 ' 拠点のラック総数(最大の機番)。この番号までを集計・スワップ対象にする
 End Sub
 
-' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数設定を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long)
+' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef maxMachNum As Long)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locDanFrom(1 To 1)
@@ -933,6 +942,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ReDim locColTo(1 To 1)
     ratioSheetName = "機番回数比"
     maxSwapRows = 15
+    maxMachNum = 46
 
     Dim wsSet As Worksheet
     On Error Resume Next
@@ -946,6 +956,11 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ' 入替候補件数(L5)。1以上の数値が入っていればそれを使う
     If IsNumeric(wsSet.Range("L5").Value) Then
         If CLng(wsSet.Range("L5").Value) >= 1 Then maxSwapRows = CLng(wsSet.Range("L5").Value)
+    End If
+
+    ' 最大機番(L6)。1以上の数値が入っていればそれを使う(拠点のラック総数に合わせる)
+    If IsNumeric(wsSet.Range("L6").Value) Then
+        If CLng(wsSet.Range("L6").Value) >= 1 Then maxMachNum = CLng(wsSet.Range("L6").Value)
     End If
 
     ' 除外機番リスト(A列、5行目以降)
