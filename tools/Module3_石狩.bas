@@ -1055,12 +1055,17 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
         Next rC
     End If
 
-    ' 除外品コードリスト(I列、5行目以降)
+    ' 除外品コードリスト(I列、5行目以降)。ロケーションマスタ側の品コードは先頭ゼロ付きの文字列で
+    ' 保持されているため、入力された値が数値の場合は先頭ゼロを除いた形でも登録し、
+    ' 表記ゆれ(0326298 と 326298 など)があっても一致するようにする
     Dim lastI As Long: lastI = wsSet.Cells(wsSet.Rows.Count, "I").End(xlUp).Row
     Dim rI As Long
     For rI = 5 To lastI
         Dim codeStr As String: codeStr = Trim(CStr(wsSet.Cells(rI, 9).Value))
-        If codeStr <> "" Then dictExcludedItemCode(codeStr) = True
+        If codeStr <> "" Then
+            dictExcludedItemCode(codeStr) = True
+            If IsNumeric(codeStr) Then dictExcludedItemCode(CStr(CLng(codeStr))) = True
+        End If
     Next rI
 End Sub
 
@@ -1087,11 +1092,17 @@ Function IsExcludedSlot3(dictExcludedMach As Object, mach As Integer) As Boolean
 End Function
 
 ' 指定の機番・段・列にある品が「除外品コード」設定に該当するか判定する(CFシートのロケーション⇔品コード対応表を使って引く)
+' 品コードは先頭ゼロの有無で表記ゆれが起きるため、元の文字列と先頭ゼロを除いた数値表記の両方で照合する
 Function IsExcludedItemCode(dictLocCode As Object, dictExcludedItemCode As Object, ByVal mach As Integer, ByVal dan As Integer, ByVal retsu As Integer) As Boolean
     If dictExcludedItemCode.Count = 0 Then Exit Function
     Dim locCodeKey As String: locCodeKey = CStr(CLng(mach) * 10000& + CLng(dan) * 100& + CLng(retsu))
     If dictLocCode.Exists(locCodeKey) Then
-        IsExcludedItemCode = dictExcludedItemCode.Exists(Trim(CStr(dictLocCode(locCodeKey))))
+        Dim rawCode As String: rawCode = Trim(CStr(dictLocCode(locCodeKey)))
+        If dictExcludedItemCode.Exists(rawCode) Then
+            IsExcludedItemCode = True
+        ElseIf IsNumeric(rawCode) Then
+            IsExcludedItemCode = dictExcludedItemCode.Exists(CStr(CLng(rawCode)))
+        End If
     End If
 End Function
 
