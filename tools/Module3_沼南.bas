@@ -13,7 +13,7 @@ Sub OptimizeABFormationFlow()
     Set dictItemZone = CreateObject("Scripting.Dictionary")
 
     Dim dictPairs As Object: Set dictPairs = CreateObject("Scripting.Dictionary") ' 同一ゾーン内アイテムペアの共起回数
-    Dim dictCrossFace As Object: Set dictCrossFace = CreateObject("Scripting.Dictionary") ' そのペアが対面(異なる機番)かどうか
+    Dim dictCrossFace As Object: Set dictCrossFace = CreateObject("Scripting.Dictionary") ' そのペアが対面(異なる号機)かどうか
     Dim currentFormationItems As Object: Set currentFormationItems = CreateObject("Scripting.Dictionary")
     Dim orderCountInFormation As Long: orderCountInFormation = 0
     Dim dictAllHit As Object: Set dictAllHit = CreateObject("Scripting.Dictionary") ' AB稼働率スコア用:全ゾーンのヒット数
@@ -26,8 +26,8 @@ Sub OptimizeABFormationFlow()
     Dim dictCrossFaceAll As Object: Set dictCrossFaceAll = CreateObject("Scripting.Dictionary")
     Dim currentFormationItemsAll As Object: Set currentFormationItemsAll = CreateObject("Scripting.Dictionary")
 
-    ' 拠点カスタマイズ設定:除外機番・除外ロケーション・除外品コードを「設定」シートから読み込む
-    Dim dictExcludedMach As Object: Set dictExcludedMach = CreateObject("Scripting.Dictionary") ' スワップ対象外にする機番
+    ' 拠点カスタマイズ設定:除外号機・除外ロケーション・除外品コードを「設定」シートから読み込む
+    Dim dictExcludedMach As Object: Set dictExcludedMach = CreateObject("Scripting.Dictionary") ' スワップ対象外にする号機
     Dim excludedLocMach() As Long, excludedLocDanFrom() As Long, excludedLocDanTo() As Long, excludedLocColFrom() As Long, excludedLocColTo() As Long
     Dim excludedLocCount As Long: excludedLocCount = 0
     Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary") ' 全ての集計・スワップ対象から除外する品コード
@@ -43,7 +43,7 @@ Sub OptimizeABFormationFlow()
         Dim lastCF As Long: lastCF = wsCF.Cells(wsCF.Rows.Count, "B").End(xlUp).Row
         Dim cf As Long
         For cf = 2 To lastCF
-            Dim locCode As String: locCode = Trim(CStr(wsCF.Cells(cf, 2).Value)) ' B列:ロケーション番号(機番*10000+段*100+列)
+            Dim locCode As String: locCode = Trim(CStr(wsCF.Cells(cf, 2).Value)) ' B列:ロケーション番号(号機*10000+段*100+列)
             If locCode <> "" And Not dictLocName.Exists(locCode) Then
                 dictLocName.Add locCode, CStr(wsCF.Cells(cf, 9).Value) ' I列:品名
                 Dim codeVal As Variant
@@ -67,14 +67,14 @@ Sub OptimizeABFormationFlow()
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
     Dim abSlotCount As Long: abSlotCount = 850 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
-    ' ABブロック:AB編成のゾーン対象とする機番範囲(複数ブロック可)。既定は沼南の実際のラック配置(1～30、37～50)
+    ' ABブロック:AB編成のゾーン対象とする号機範囲(複数ブロック可)。既定は沼南の実際のラック配置(1～30、37～50)
     ' 61～73(Cバラ01)、81～93(Cバラ02)、その他(拡張X)はAB編成のゾーン・スワップ対象外
     Dim abBlockFrom() As Long, abBlockTo() As Long
     Dim abBlockCount As Long
     Call EnsureExclusionSettingsSheet
     Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount)
     Dim maxZoneNum As Long: maxZoneNum = GetTotalZoneCount(abBlockFrom, abBlockTo, abBlockCount) ' 全ブロック合計のゾーン数
-    Dim maxMachNum As Long: maxMachNum = GetMaxBlockMach(abBlockFrom, abBlockTo, abBlockCount) ' 配列サイズ確保用(最も大きいブロック終了機番)
+    Dim maxMachNum As Long: maxMachNum = GetMaxBlockMach(abBlockFrom, abBlockTo, abBlockCount) ' 配列サイズ確保用(最も大きいブロック終了号機)
 
     ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
     Call LoadItemMasterFilesIfSelected(dictLocCode, dictLocName)
@@ -159,9 +159,9 @@ Sub OptimizeABFormationFlow()
                         Dim itemCodeExcluded As Boolean
                         itemCodeExcluded = IsExcludedItemCode(dictLocCode, dictExcludedItemCode, mach, dan, retsu)
 
-                        ' AB稼働率スコア用:全ゾーン(機番の範囲を問わず)のヒット数を集計(実在番のみ対象)
+                        ' AB稼働率スコア用:全ゾーン(号機の範囲を問わず)のヒット数を集計(実在番のみ対象)
                         ' AB上限回数比率・AB実績回数比率は倉庫全体の生データで比較する指標のため、
-                        ' 除外機番・除外ロケーション・除外品コードの設定はここでは適用しない
+                        ' 除外号機・除外ロケーション・除外品コードの設定はここでは適用しない
                         If mach > 0 Then
                             Dim allLocKey As String: allLocKey = "M" & Format(mach, "000") & Format(dan, "00") & Format(retsu, "00")
                             dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
@@ -171,7 +171,7 @@ Sub OptimizeABFormationFlow()
                             Dim zoneNum As Long: zoneNum = ComputeZoneForMach(mach, abBlockFrom, abBlockTo, abBlockCount) ' 1～30番機は1&2→1,3&4→2…29&30→15、37～50番機は37&38→16…49&50→22
                             Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
 
-                            ' ヒートマップ用:除外機番も含めた全AB番号(除外ロケーション・除外品コードのみ除く)でゾーン・面情報を記録
+                            ' ヒートマップ用:除外号機も含めた全AB番号(除外ロケーション・除外品コードのみ除く)でゾーン・面情報を記録
                             If Not itemCodeExcluded And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
                                 dictItemZoneAll(locKey) = zoneNum
                                 dictItemMachAll(locKey) = mach
@@ -196,7 +196,7 @@ Sub OptimizeABFormationFlow()
     Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
     Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
 
-    ' 2.5 現在の奇数機番・偶数機番の合計ヒット数を算出(左右バランスの基準値。以降スワップのたびに更新する)
+    ' 2.5 現在の奇数号機・偶数号機の合計ヒット数を算出(左右バランスの基準値。以降スワップのたびに更新する)
     Dim oddTotal As Double, evenTotal As Double
     oddTotal = 0: evenTotal = 0
     Dim hitKey As Variant
@@ -424,8 +424,8 @@ Sub OptimizeABFormationFlow()
         wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
         wsOut.Range("A2:M2").Merge
-        wsOut.Cells(2, 1).Value = "奇数機番合計ヒット数: " & Format(oddTotalStart, "0") & " → " & Format(oddTotal, "0") & _
-            "　／　偶数機番合計ヒット数: " & Format(evenTotalStart, "0") & " → " & Format(evenTotal, "0") & _
+        wsOut.Cells(2, 1).Value = "奇数号機合計ヒット数: " & Format(oddTotalStart, "0") & " → " & Format(oddTotal, "0") & _
+            "　／　偶数号機合計ヒット数: " & Format(evenTotalStart, "0") & " → " & Format(evenTotal, "0") & _
             "(差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0") & ")"
         wsOut.Cells(2, 1).HorizontalAlignment = xlLeft
 
@@ -436,8 +436,8 @@ Sub OptimizeABFormationFlow()
         wsOut.Range("A4:M4").Font.Bold = True
         wsOut.Columns("A:M").AutoFit
 
-        ' 対面同士のヒット状況ヒートマップ(1&2番機～maxMachNum番機を機番配置順にゾーン表示)
-        ' ※除外機番はスワップ候補・AB稼働率スコアの対象外だが、ヒートマップは実態を反映するためdictPairsAll(除外ロケーションのみ反映)を使う
+        ' 対面同士のヒット状況ヒートマップ(1&2番機～maxMachNum番機を号機配置順にゾーン表示)
+        ' ※除外号機はスワップ候補・AB稼働率スコアの対象外だが、ヒートマップは実態を反映するためdictPairsAll(除外ロケーションのみ反映)を使う
         Dim zoneCrossHit() As Double, zoneTotalHit() As Double ' zoneTotalHitはそのゾーンの同面込みヒット数(対面比率(%)の分母)
         ReDim zoneCrossHit(1 To maxZoneNum)
         ReDim zoneTotalHit(1 To maxZoneNum)
@@ -493,7 +493,7 @@ Sub OptimizeABFormationFlow()
             Dim gb As Integer: gb = 255 - CInt(155 * crossRatio) ' 0件=白、最大件数=濃い赤
             wsOut.Cells(heatValueRow, heatCol).Interior.Color = RGB(255, gb, gb)
 
-            ' ゾーン内対面比率(%):そのゾーンの同時ヒットのうち対面が占める割合(機番選定の精度を見る指標)
+            ' ゾーン内対面比率(%):そのゾーンの同時ヒットのうち対面が占める割合(号機選定の精度を見る指標)
             Dim zonePct As Double
             If zoneTotalHit(zi) > 0 Then zonePct = zoneCrossHit(zi) / zoneTotalHit(zi) * 100 Else zonePct = 0
             wsOut.Cells(heatPctRow, heatCol).Value = zonePct / 100
@@ -531,7 +531,7 @@ Sub OptimizeABFormationFlow()
                 End If
             Next rr3
 
-            ' ABブロック内の機番を対象に、設定シートの除外機番だけを動的に除いて正規化して比較する
+            ' ABブロック内の号機を対象に、設定シートの除外号機だけを動的に除いて正規化して比較する
             Dim hitTotal As Double, targetTotal As Double, mIdx As Long
             hitTotal = 0: targetTotal = 0
             For mIdx = 1 To maxMachNum
@@ -544,7 +544,7 @@ Sub OptimizeABFormationFlow()
             If hitTotal <= 0 Then
                 abRatioScoreNote = "実績データが除外設定によりすべて対象外のため、AB稼働率スコアは算出されていません"
             ElseIf targetTotal <= 0 Then
-                abRatioScoreNote = "「" & ratioSheetName & "」シートにABブロック対象機番の目標比率(A列ラベル・E列数値、3～" & (2 + maxMachNum) & "行目)が見つからないため、AB稼働率スコアは算出されていません"
+                abRatioScoreNote = "「" & ratioSheetName & "」シートにABブロック対象号機の目標比率(A列ラベル・E列数値、3～" & (2 + maxMachNum) & "行目)が見つからないため、AB稼働率スコアは算出されていません"
             Else
                 Dim sumAbsDiff As Double: sumAbsDiff = 0
                 For mIdx = 1 To maxMachNum
@@ -603,7 +603,7 @@ Sub OptimizeABFormationFlow()
             End If
         End If
 
-        ' KPI記録:対面化ヒットスコア(ゾーンごとに機番の奇数/偶数の組み方まで含めて最適配置した場合の
+        ' KPI記録:対面化ヒットスコア(ゾーンごとに号機の奇数/偶数の組み方まで含めて最適配置した場合の
         ' 「理論上最小の対面ヒット数」に対して、実績の対面ヒット数がどれだけ近いかで評価する)
         Dim actualCrossFaceHits As Double: actualCrossFaceHits = 0
         Dim theoreticalMinCrossFace As Double: theoreticalMinCrossFace = 0
@@ -643,7 +643,7 @@ Sub OptimizeABFormationFlow()
         Else
             reportDate = DateSerial(Year(latestFileDate), Month(latestFileDate), Day(latestFileDate))
         End If
-        ' 奇数機番・偶数機番の均衡化スコア(0～100、100が完全均衡)を変更前・変更後それぞれ算出する
+        ' 奇数号機・偶数号機の均衡化スコア(0～100、100が完全均衡)を変更前・変更後それぞれ算出する
         Dim balanceScoreBefore As Double, balanceScoreAfter As Double
         If (oddTotalStart + evenTotalStart) > 0 Then
             balanceScoreBefore = 100 * (1 - Abs(oddTotalStart - evenTotalStart) / (oddTotalStart + evenTotalStart))
@@ -661,7 +661,7 @@ Sub OptimizeABFormationFlow()
 
         Dim completeMsg As String
         completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
-            "左右機番の差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0")
+            "左右号機の差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0")
         If abRatioScoreNote <> "" Then completeMsg = completeMsg & vbCrLf & "※" & abRatioScoreNote
         MsgBox completeMsg, vbInformation
     Else
@@ -678,7 +678,7 @@ End Sub
 ' 補助関数群
 ' ----------------------------------------------------
 
-' 編成内で同一ゾーンとなるアイテムペアを記録し、対面(異なる機番)かどうかも記録する
+' 編成内で同一ゾーンとなるアイテムペアを記録し、対面(異なる号機)かどうかも記録する
 Sub RecordZonePairs(currentItems As Object, dictPairs As Object, dictCrossFace As Object, dictZone As Object, dictMach As Object)
     If currentItems.Count < 2 Then Exit Sub
     Dim itemsArr() As Variant: itemsArr = currentItems.Keys
@@ -701,9 +701,9 @@ Sub RecordZonePairs(currentItems As Object, dictPairs As Object, dictCrossFace A
     Next i
 End Sub
 
-' 1つのゾーン内で、奇数機番・偶数機番の組み方まで含めて最適配置した場合の
+' 1つのゾーン内で、奇数号機・偶数号機の組み方まで含めて最適配置した場合の
 ' 「理論上最小の対面ヒット数」を局所探索(Kernighan-Linに近い2分割法)で求める。
-' itemsArr: そのゾーンに属するアイテムキーの配列／dictMach: アイテム→機番／weightDict: "item1,item2"(ソート済)→編成内共起回数
+' itemsArr: そのゾーンに属するアイテムキーの配列／dictMach: アイテム→号機／weightDict: "item1,item2"(ソート済)→編成内共起回数
 Function ComputeZoneMinCut(itemsArr() As Variant, dictMach As Object, weightDict As Object) As Double
     Dim n As Long: n = UBound(itemsArr) - LBound(itemsArr) + 1
     If n <= 1 Then ComputeZoneMinCut = 0: Exit Function
@@ -813,11 +813,11 @@ End Function
 ' 品名マスタ・ロケーションマスタ(任意)
 ' ----------------------------------------------------
 
-' 品コード⇔品名の対応(品名マスタ)、機番・段・列⇔品コードの対応(ロケーションマスタ)を、
+' 品コード⇔品名の対応(品名マスタ)、号機・段・列⇔品コードの対応(ロケーションマスタ)を、
 ' CFシートとは別に外部ファイルから読み込めるようにする。ファイル選択ダイアログでキャンセルすれば、
 ' 何もせずCFシートの内容だけで従来通り動作する。2種類のファイルをまとめて選択でき、
 ' 先頭行が"B"で始まるかどうかでどちらのファイルかを自動判別する。
-'   ロケーションマスタ:1行目"B"+日付、以降"E"+機番(2)+段(2)+列(2)+品コード(6)+…(固定長)
+'   ロケーションマスタ:1行目"B"+日付、以降"E"+号機(2)+段(2)+列(2)+品コード(6)+…(固定長)
 '   品名マスタ:1行目から品コード(7桁)+…+品名(半角カナ、55～72文字目)+…(固定長128バイト)
 Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     Dim fd2 As Office.FileDialog
@@ -843,7 +843,7 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
             Line Input #fileNo2, firstLine
 
             If Left(firstLine, 1) = "B" Then
-                ' ロケーションマスタ:E行の2～7文字目=機番段列(6桁)、8～15文字目=品コード(8桁固定域。
+                ' ロケーションマスタ:E行の2～7文字目=号機段列(6桁)、8～15文字目=品コード(8桁固定域。
                 ' 6桁品コードは末尾2文字が空白埋め、8桁品コード(28xxxxxx等)はそのまま埋まる)
                 Do While Not EOF(fileNo2)
                     Line Input #fileNo2, textLine2
@@ -921,14 +921,14 @@ Sub EnsureOperationPanelSheet()
     wsPanel.Range("B4").Value = _
         "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同一号機・同一ゾーン(対面)で" & _
         "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案するツールです。" & _
-        "同時ピッキングの集中を緩和し、機番間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
+        "同時ピッキングの集中を緩和し、号機間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
         "【使い方】" & vbCrLf & _
         "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
-        "②ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
-        "③品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
+        "②品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
+        "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
         "④「AB編成動線最適化」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
-        "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・ABブロックなどは「設定」シートで変更できます" & _
+        "除外号機・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・ABブロックなどは「設定」シートで変更できます" & _
         "(シートが無ければ実行時に自動作成されます)。"
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
@@ -978,7 +978,7 @@ End Sub
 ' abTheoreticalRatio:全体の回数上位abSlotCount件(AB間口数)が占める比率(AB管理の理論上の上限)
 ' abActualRatio:ABブロック内の実回数が全体に占める比率(実績)
 ' crossFaceScoreVal:同号機・対面での同時ピッキングを理論上の最小までどれだけ避けられているかのスコア(0～100、高いほど良い)
-' balanceScoreBefore/After:奇数機番・偶数機番の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。変更前(スワップ適用前)と変更後(適用後)を並べて記録する
+' balanceScoreBefore/After:奇数号機・偶数号機の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。変更前(スワップ適用前)と変更後(適用後)を並べて記録する
 Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As Variant, crossFaceScoreVal As Variant, balanceScoreBefore As Variant, balanceScoreAfter As Variant)
     Dim wsKPI As Worksheet
     On Error Resume Next
@@ -1009,12 +1009,12 @@ Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As V
 End Sub
 
 ' ----------------------------------------------------
-' 拠点カスタマイズ設定(除外機番・除外ロケーション)
+' 拠点カスタマイズ設定(除外号機・除外ロケーション)
 ' ----------------------------------------------------
 
 ' 「設定」シートが無い場合、沼南の実際のラック配置(ABブロック:1～30、37～50。61～73はCバラ01、
 ' 81～93はCバラ02、それ以外は拡張Xとして扱いAB編成の対象外)を初期値として自動生成する。
-' 除外機番・除外ロケーションは拠点固有の情報が無いため空欄で初期化し、必要に応じて追記する。
+' 除外号機・除外ロケーションは拠点固有の情報が無いため空欄で初期化し、必要に応じて追記する。
 ' 列幅は用途ごとに固定値で設定する(説明文の長さに引っ張られて横に広がらないようにするため、AutoFitは使わない)。
 Sub EnsureExclusionSettingsSheet()
     Dim wsSet As Worksheet
@@ -1026,9 +1026,9 @@ Sub EnsureExclusionSettingsSheet()
     Set wsSet = ThisWorkbook.Sheets.Add
     wsSet.Name = "設定"
 
-    wsSet.Columns("A:A").ColumnWidth = 10  ' 除外機番
+    wsSet.Columns("A:A").ColumnWidth = 10  ' 除外号機
     wsSet.Columns("B:B").ColumnWidth = 3   ' 区切り
-    wsSet.Columns("C:G").ColumnWidth = 8   ' 除外ロケーション(機番/段From/段To/列From/列To)
+    wsSet.Columns("C:G").ColumnWidth = 8   ' 除外ロケーション(号機/段From/段To/列From/列To)
     wsSet.Columns("H:H").ColumnWidth = 3   ' 区切り
     wsSet.Columns("I:I").ColumnWidth = 14  ' 除外品コード
     wsSet.Columns("I:I").NumberFormat = "@" ' 品コードは先頭0落ち・数値化を防ぐため文字列扱いにする
@@ -1036,23 +1036,23 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Columns("K:K").ColumnWidth = 20  ' シート名設定ラベル
     wsSet.Columns("L:L").ColumnWidth = 16  ' シート名設定値
     wsSet.Columns("M:M").ColumnWidth = 3   ' 区切り
-    wsSet.Columns("N:O").ColumnWidth = 10  ' ABブロック(開始機番/終了機番)
+    wsSet.Columns("N:O").ColumnWidth = 10  ' ABブロック(開始号機/終了号機)
 
     wsSet.Range("A1:O1").Merge
-    wsSet.Range("A1").Value = "AB編成動線最適化の対象範囲・除外条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。④ABブロック:AB編成のゾーン・スワップ対象とする機番範囲(複数ブロック可、各ブロック内で機番2台ずつを1ゾーンとして連番付けする)。ブロック外の機番(沼南ではCバラ01=61～73、Cバラ02=81～93、拡張X=それ以外)はAB編成の対象外。各表の5行目以降に追加・削除して使ってください。"
+    wsSet.Range("A1").Value = "AB編成動線最適化の対象範囲・除外条件をここで設定します。①除外号機:スワップ対象・AB稼働率スコアから号機ごと除外。②除外ロケーション:常時使用スロットなど号機×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。④ABブロック:AB編成のゾーン・スワップ対象とする号機範囲(複数ブロック可、各ブロック内で号機2台ずつを1ゾーンとして連番付けする)。ブロック外の号機(沼南ではCバラ01=61～73、Cバラ02=81～93、拡張X=それ以外)はAB編成の対象外。各表の5行目以降に追加・削除して使ってください。"
     wsSet.Range("A1").Font.Bold = True
     wsSet.Range("A1").WrapText = True
     wsSet.Range("A1").VerticalAlignment = xlTop
     wsSet.Rows(1).RowHeight = 75
 
-    wsSet.Range("A3").Value = "■除外機番"
+    wsSet.Range("A3").Value = "■除外号機"
     wsSet.Range("A3").Font.Bold = True
-    wsSet.Range("A4").Value = "機番"
+    wsSet.Range("A4").Value = "号機"
     wsSet.Range("A4").Font.Bold = True
 
     wsSet.Range("C3").Value = "■除外ロケーション"
     wsSet.Range("C3").Font.Bold = True
-    wsSet.Range("C4").Value = "機番": wsSet.Range("D4").Value = "段From": wsSet.Range("E4").Value = "段To": wsSet.Range("F4").Value = "列From": wsSet.Range("G4").Value = "列To"
+    wsSet.Range("C4").Value = "号機": wsSet.Range("D4").Value = "段From": wsSet.Range("E4").Value = "段To": wsSet.Range("F4").Value = "列From": wsSet.Range("G4").Value = "列To"
     wsSet.Range("C4:G4").Font.Bold = True
 
     wsSet.Range("I3").Value = "■除外品コード"
@@ -1076,7 +1076,7 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("N3").Value = "■ABブロック"
     wsSet.Range("N3").Font.Bold = True
-    wsSet.Range("N4").Value = "開始機番": wsSet.Range("O4").Value = "終了機番"
+    wsSet.Range("N4").Value = "開始号機": wsSet.Range("O4").Value = "終了号機"
     wsSet.Range("N4:O4").Font.Bold = True
     ' 沼南の実際のラック配置:1～30(ゾーン1～15)、37～50(ゾーン16～22)。61～73(Cバラ01)、81～93(Cバラ02)、
     ' それ以外(拡張X)はここに含めない=AB編成のゾーン・スワップ対象外になる
@@ -1084,7 +1084,7 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("N6").Value = 37: wsSet.Range("O6").Value = 50
 End Sub
 
-' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
+' 「設定」シートの内容を読み込み、除外号機・除外品コードの辞書と除外ロケーションの配列、シート名・件数・号機範囲設定を組み立てる
 Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef abSlotCount As Long, ByRef abBlockFrom() As Long, ByRef abBlockTo() As Long, ByRef abBlockCount As Long)
     locCount = 0
     ReDim locMach(1 To 1)
@@ -1147,7 +1147,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
         End If
     End If
 
-    ' 除外機番リスト(A列、5行目以降)
+    ' 除外号機リスト(A列、5行目以降)
     Dim lastA As Long: lastA = wsSet.Cells(wsSet.Rows.Count, "A").End(xlUp).Row
     Dim rA As Long
     For rA = 5 To lastA
@@ -1156,7 +1156,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
         End If
     Next rA
 
-    ' 除外ロケーションリスト(C:G列=機番/段From/段To/列From/列To、5行目以降)
+    ' 除外ロケーションリスト(C:G列=号機/段From/段To/列From/列To、5行目以降)
     Dim lastC As Long: lastC = wsSet.Cells(wsSet.Rows.Count, "C").End(xlUp).Row
     If lastC >= 5 Then
         ReDim locMach(1 To lastC - 4)
@@ -1191,7 +1191,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     Next rI
 End Sub
 
-' 指定の機番が、いずれかのABブロックに含まれるかを判定する(ブロック外はAB編成のゾーン・スワップ対象外)
+' 指定の号機が、いずれかのABブロックに含まれるかを判定する(ブロック外はAB編成のゾーン・スワップ対象外)
 Function IsInABBlock(mach As Integer, abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long) As Boolean
     Dim bi As Long
     For bi = 1 To abBlockCount
@@ -1203,9 +1203,9 @@ Function IsInABBlock(mach As Integer, abBlockFrom() As Long, abBlockTo() As Long
     IsInABBlock = False
 End Function
 
-' 指定の機番が属するゾーン番号を求める。各ブロック内で機番2台ずつを1ゾーンとし、
+' 指定の号機が属するゾーン番号を求める。各ブロック内で号機2台ずつを1ゾーンとし、
 ' ブロックをまたぐごとにゾーン番号を連番で継続する(例:ブロック1が1～30なら15ゾーン、
-' 続くブロック2の先頭ゾーンは16から)。ブロック外の機番は0(対象外)を返す
+' 続くブロック2の先頭ゾーンは16から)。ブロック外の号機は0(対象外)を返す
 Function ComputeZoneForMach(mach As Integer, abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long) As Long
     Dim zoneBase As Long: zoneBase = 0
     Dim bi As Long
@@ -1229,7 +1229,7 @@ Function GetTotalZoneCount(abBlockFrom() As Long, abBlockTo() As Long, abBlockCo
     GetTotalZoneCount = total
 End Function
 
-' ゾーン番号から、そのゾーンが指す実際の機番ペア("37&38"など)のラベルを求める(ComputeZoneForMachの逆変換)。
+' ゾーン番号から、そのゾーンが指す実際の号機ペア("37&38"など)のラベルを求める(ComputeZoneForMachの逆変換)。
 ' ブロックをまたいでゾーン番号が連番になっているため、単純な(zi*2-1)&(zi*2)では2つ目以降のブロックがズレる
 Function GetMachPairLabel(zoneNum As Long, abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long) As String
     Dim zoneBase As Long: zoneBase = 0
@@ -1247,7 +1247,7 @@ Function GetMachPairLabel(zoneNum As Long, abBlockFrom() As Long, abBlockTo() As
     GetMachPairLabel = CStr(zoneNum) ' 該当ブロックが見つからない場合のフォールバック
 End Function
 
-' 全ABブロックのうち最も大きい終了機番(machHit/machTarget配列のサイズ確保に使う)
+' 全ABブロックのうち最も大きい終了号機(machHit/machTarget配列のサイズ確保に使う)
 Function GetMaxBlockMach(abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long) As Long
     Dim maxVal As Long: maxVal = 1
     Dim bi As Long
@@ -1257,7 +1257,7 @@ Function GetMaxBlockMach(abBlockFrom() As Long, abBlockTo() As Long, abBlockCoun
     GetMaxBlockMach = maxVal
 End Function
 
-' 指定の機番・段・列が「除外ロケーション」設定に該当するか判定する(段From/To・列From/Toはそれぞれ両方0なら「全段」「全列」の意味になる)
+' 指定の号機・段・列が「除外ロケーション」設定に該当するか判定する(段From/To・列From/Toはそれぞれ両方0なら「全段」「全列」の意味になる)
 Function IsExcludedLocation(mach As Integer, dan As Integer, col As Integer, locMach() As Long, locDanFrom() As Long, locDanTo() As Long, locColFrom() As Long, locColTo() As Long, locCount As Long) As Boolean
     Dim i As Long
     For i = 1 To locCount
@@ -1274,12 +1274,12 @@ Function IsExcludedLocation(mach As Integer, dan As Integer, col As Integer, loc
     IsExcludedLocation = False
 End Function
 
-' 指定の機番が「除外機番」設定に該当するか判定する(1～4番機のような、サイズが異なる品を格納する機番など)
+' 指定の号機が「除外号機」設定に該当するか判定する(1～4番機のような、サイズが異なる品を格納する号機など)
 Function IsExcludedSlot3(dictExcludedMach As Object, mach As Integer) As Boolean
     IsExcludedSlot3 = dictExcludedMach.Exists(CStr(mach))
 End Function
 
-' 指定の機番・段・列にある品が「除外品コード」設定に該当するか判定する(CFシートのロケーション⇔品コード対応表を使って引く)
+' 指定の号機・段・列にある品が「除外品コード」設定に該当するか判定する(CFシートのロケーション⇔品コード対応表を使って引く)
 ' 品コードは先頭ゼロの有無で表記ゆれが起きるため、元の文字列と先頭ゼロを除いた数値表記の両方で照合する
 Function IsExcludedItemCode(dictLocCode As Object, dictExcludedItemCode As Object, ByVal mach As Integer, ByVal dan As Integer, ByVal retsu As Integer) As Boolean
     If dictExcludedItemCode.Count = 0 Then Exit Function
