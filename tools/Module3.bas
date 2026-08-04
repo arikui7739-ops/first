@@ -686,18 +686,22 @@ Sub OptimizeABFormationFlow()
                 End If
             Next rr3
 
-            ' 実績で対象となった機番(5～46。1～4番機は集計対象外)だけで正規化して比較する
+            ' 1号機～46号機を対象に、設定シートの除外機番だけを動的に除いて正規化して比較する
             Dim hitTotal As Double, targetTotal As Double, mIdx As Integer
             hitTotal = 0: targetTotal = 0
-            For mIdx = 5 To 46
-                hitTotal = hitTotal + machHit(mIdx)
-                targetTotal = targetTotal + machTarget(mIdx)
+            For mIdx = 1 To 46
+                If Not dictExcludedMach.Exists(CStr(mIdx)) Then
+                    hitTotal = hitTotal + machHit(mIdx)
+                    targetTotal = targetTotal + machTarget(mIdx)
+                End If
             Next mIdx
 
             If hitTotal > 0 And targetTotal > 0 Then
                 Dim sumAbsDiff As Double: sumAbsDiff = 0
-                For mIdx = 5 To 46
-                    sumAbsDiff = sumAbsDiff + Abs((machHit(mIdx) / hitTotal) - (machTarget(mIdx) / targetTotal))
+                For mIdx = 1 To 46
+                    If Not dictExcludedMach.Exists(CStr(mIdx)) Then
+                        sumAbsDiff = sumAbsDiff + Abs((machHit(mIdx) / hitTotal) - (machTarget(mIdx) / targetTotal))
+                    End If
                 Next mIdx
                 ' 差の合計(sumAbsDiff)が0.6(理論上の最大2.0の約1/3)以上で0点、0で100点、その間は線形
                 abRatioScore = Application.WorksheetFunction.Max(0, 100 * (1 - sumAbsDiff / 0.6))
