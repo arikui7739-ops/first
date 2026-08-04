@@ -63,6 +63,9 @@ Sub OptimizeABFormationFlow()
     Call EnsureExclusionSettingsSheet
     Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows)
 
+    ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
+    Call LoadItemMasterFilesIfSelected(dictLocCode, dictLocName)
+
     ' 1. ファイル選択(複数選択・全ファイル形式)
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
     With fd
@@ -777,6 +780,82 @@ Function ComputeZoneMinCut(itemsArr() As Variant, dictMach As Object, weightDict
 
     ComputeZoneMinCut = bestCut
 End Function
+
+' ----------------------------------------------------
+' 品名マスタ・ロケーションマスタ(任意)
+' ----------------------------------------------------
+
+' 品コード⇔品名の対応(品名マスタ)、機番・段・列⇔品コードの対応(ロケーションマスタ)を、
+' CFシートとは別に外部ファイルから読み込めるようにする。ファイル選択ダイアログでキャンセルすれば、
+' 何もせずCFシートの内容だけで従来通り動作する。2種類のファイルをまとめて選択でき、
+' 先頭行が"B"で始まるかどうかでどちらのファイルかを自動判別する。
+'   ロケーションマスタ:1行目"B"+日付、以降"E"+機番(2)+段(2)+列(2)+品コード(6)+…(固定長)
+'   品名マスタ:1行目から品コード(7桁)+…+品名(半角カナ、55～72文字目)+…(固定長128バイト)
+Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
+    Dim fd2 As Office.FileDialog
+    Set fd2 = Application.FileDialog(msoFileDialogFilePicker)
+    With fd2
+        .Title = "品名マスタ・ロケーションマスタを選択(任意・複数選択可。使わない場合はキャンセルでCFシートのみ使用)"
+        .Filters.Clear
+        .Filters.Add "すべてのファイル", "*.*"
+        .AllowMultiSelect = True
+        If .Show = False Then Exit Sub
+    End With
+
+    Dim dictItemNameByCode As Object: Set dictItemNameByCode = CreateObject("Scripting.Dictionary") ' 品コード(7桁文字列)→品名
+
+    Dim fIdx2 As Long, filePath2 As String, fileNo2 As Integer, firstLine As String, textLine2 As String
+    For fIdx2 = 1 To fd2.SelectedItems.Count
+        filePath2 = fd2.SelectedItems(fIdx2)
+        fileNo2 = FreeFile
+        Open filePath2 For Input As #fileNo2
+        If EOF(fileNo2) Then
+            Close #fileNo2
+        Else
+            Line Input #fileNo2, firstLine
+
+            If Left(firstLine, 1) = "B" Then
+                ' ロケーションマスタ:E行の2～7文字目=機番段列(6桁)、8～13文字目=品コード(6桁)
+                Do While Not EOF(fileNo2)
+                    Line Input #fileNo2, textLine2
+                    If Left(textLine2, 1) = "E" And Len(textLine2) >= 13 Then
+                        Dim locStr As String: locStr = Mid(textLine2, 2, 6)
+                        Dim itemCode6 As String: itemCode6 = Mid(textLine2, 8, 6)
+                        If IsNumeric(locStr) And IsNumeric(itemCode6) Then
+                            Dim mLocCode As String
+                            mLocCode = CStr(CLng(Mid(locStr, 1, 2)) * 10000& + CLng(Mid(locStr, 3, 2)) * 100& + CLng(Mid(locStr, 5, 2)))
+                            dictLocCode(mLocCode) = CLng(itemCode6)
+                        End If
+                    End If
+                Loop
+            Else
+                ' 品名マスタ:1～7文字目=品コード(7桁)、55～72文字目=品名(半角カナ)
+                Dim nameLine As String: nameLine = firstLine
+                Do
+                    If Len(nameLine) >= 72 And IsNumeric(Left(nameLine, 7)) Then
+                        dictItemNameByCode(Left(nameLine, 7)) = Trim(Mid(nameLine, 55, 18))
+                    End If
+                    If EOF(fileNo2) Then Exit Do
+                    Line Input #fileNo2, nameLine
+                Loop
+            End If
+            Close #fileNo2
+        End If
+    Next fIdx2
+
+    ' 品名マスタが読み込めた場合、ロケーション→品コードの対応(CF・ロケーションマスタ双方)を使って品名を上書きする
+    If dictItemNameByCode.Count > 0 Then
+        Dim locKeyIter As Variant
+        For Each locKeyIter In dictLocCode.Keys
+            If IsNumeric(dictLocCode(locKeyIter)) Then
+                Dim codeForName As String: codeForName = Format(CLng(dictLocCode(locKeyIter)), "0000000")
+                If dictItemNameByCode.Exists(codeForName) Then
+                    dictLocName(locKeyIter) = dictItemNameByCode(codeForName)
+                End If
+            End If
+        Next locKeyIter
+    End If
+End Sub
 
 ' ----------------------------------------------------
 ' 拠点カスタマイズ設定(除外機番・除外ロケーション)
