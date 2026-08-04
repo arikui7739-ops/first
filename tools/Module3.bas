@@ -58,8 +58,9 @@ Sub OptimizeABFormationFlow()
     End If
 
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
+    Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount, dictExcludedItemCode)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocFrom, excludedLocTo, excludedLocCount, dictExcludedItemCode, ratioSheetName)
 
     ' 1. ファイル選択(複数選択・全ファイル形式)
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -665,11 +666,14 @@ Sub OptimizeABFormationFlow()
 
         ' KPI記録:AB稼働率スコア(機番回数比の目標比率実績値と、今回ファイル集計結果との近さ)
         Dim abRatioScore As Variant: abRatioScore = ""
+        Dim abRatioScoreNote As String: abRatioScoreNote = ""
         Dim wsRatio3 As Worksheet
         On Error Resume Next
-        Set wsRatio3 = ActiveWorkbook.Sheets("機番回数比")
+        Set wsRatio3 = ActiveWorkbook.Sheets(ratioSheetName)
         On Error GoTo 0
-        If Not wsRatio3 Is Nothing Then
+        If wsRatio3 Is Nothing Then
+            abRatioScoreNote = "「" & ratioSheetName & "」シートが見つからないため、AB稼働率スコアは算出されていません(「設定」シートJ4でシート名を確認してください)"
+        Else
             Dim machHit(1 To 46) As Double, machTarget(1 To 46) As Double
             Dim hk As Variant
             For Each hk In dictItemHit.Keys
@@ -696,7 +700,11 @@ Sub OptimizeABFormationFlow()
                 End If
             Next mIdx
 
-            If hitTotal > 0 And targetTotal > 0 Then
+            If hitTotal <= 0 Then
+                abRatioScoreNote = "実績データが除外設定によりすべて対象外のため、AB稼働率スコアは算出されていません"
+            ElseIf targetTotal <= 0 Then
+                abRatioScoreNote = "「" & ratioSheetName & "」シートにAB01～AB46の目標比率(A列ラベル・E列数値、3～48行目)が見つからないため、AB稼働率スコアは算出されていません"
+            Else
                 Dim sumAbsDiff As Double: sumAbsDiff = 0
                 For mIdx = 1 To 46
                     If Not dictExcludedMach.Exists(CStr(mIdx)) Then
@@ -798,8 +806,11 @@ Sub OptimizeABFormationFlow()
         Module7.LogFormationScore oddTotalStart, evenTotalStart, oddTotal, evenTotal, crossFaceScore, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
         On Error GoTo 0
 
-        MsgBox "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
-            "左右機番の差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0"), vbInformation
+        Dim completeMsg As String
+        completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
+            "左右機番の差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0")
+        If abRatioScoreNote <> "" Then completeMsg = completeMsg & vbCrLf & "※" & abRatioScoreNote
+        MsgBox completeMsg, vbInformation
     Else
         MsgBox "入替候補が見つかりませんでした。", vbExclamation
     End If
@@ -968,6 +979,9 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Columns("F:F").ColumnWidth = 3   ' 区切り
     wsSet.Columns("G:G").ColumnWidth = 14  ' 除外品コード
     wsSet.Columns("G:G").NumberFormat = "@" ' 品コードは先頭0落ち・数値化を防ぐため文字列扱いにする
+    wsSet.Columns("H:H").ColumnWidth = 3   ' 区切り
+    wsSet.Columns("I:I").ColumnWidth = 20  ' シート名設定ラベル
+    wsSet.Columns("J:J").ColumnWidth = 16  ' シート名設定値
 
     wsSet.Range("A1:G1").Merge
     wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×列の範囲で稼働率・ヒートマップ集計から除外(列From/Toを空欄にするとその機番全体を除外)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
@@ -996,20 +1010,30 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("G3").Font.Bold = True
     wsSet.Range("G4").Value = "品コード"
     wsSet.Range("G4").Font.Bold = True
+
+    wsSet.Range("I3").Value = "■シート名設定"
+    wsSet.Range("I3").Font.Bold = True
+    wsSet.Range("I4").Value = "機番回数比シート名"
+    wsSet.Range("I4").Font.Bold = True
+    wsSet.Range("J4").Value = "機番回数比" ' AB稼働率スコアの目標比率を読むシート名。拠点によって名前が違う場合はここを書き換える
 End Sub
 
-' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object)
+' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名設定を組み立てる
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locFrom() As Long, ByRef locTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locFrom(1 To 1)
     ReDim locTo(1 To 1)
+    ratioSheetName = "機番回数比"
 
     Dim wsSet As Worksheet
     On Error Resume Next
     Set wsSet = ThisWorkbook.Sheets("設定")
     On Error GoTo 0
     If wsSet Is Nothing Then Exit Sub
+
+    ' 機番回数比シート名(J4)。空欄ならデフォルト名のまま
+    If Trim(CStr(wsSet.Range("J4").Value)) <> "" Then ratioSheetName = Trim(CStr(wsSet.Range("J4").Value))
 
     ' 除外機番リスト(A列、5行目以降)
     Dim lastA As Long: lastA = wsSet.Cells(wsSet.Rows.Count, "A").End(xlUp).Row
