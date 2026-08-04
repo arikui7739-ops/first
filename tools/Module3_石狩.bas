@@ -890,10 +890,11 @@ Sub EnsureOperationPanelSheet()
     wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
     wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
-    wsPanel.Range("B4:H16").Merge
+    wsPanel.Range("B4:H18").Merge
     wsPanel.Range("B4").Value = _
-        "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同時に出庫されやすい商品同士を" & _
-        "近くに配置し直すための入替候補を提案するツールです。" & vbCrLf & vbCrLf & _
+        "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同一号機・同一ゾーン(対面)で" & _
+        "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案するツールです。" & _
+        "同時ピッキングの集中を緩和し、機番間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
         "【使い方】" & vbCrLf & _
         "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
         "②ピッキング実績ファイル(複数選択可)を選ぶ" & vbCrLf & _
@@ -905,10 +906,10 @@ Sub EnsureOperationPanelSheet()
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
     wsPanel.Range("B4").VerticalAlignment = xlTop
-    wsPanel.Rows("4:16").RowHeight = 18
+    wsPanel.Rows("4:18").RowHeight = 18
 
     Dim btn As Button
-    Set btn = wsPanel.Buttons.Add(wsPanel.Range("B18").Left, wsPanel.Range("B18").Top, 220, 36)
+    Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
     btn.OnAction = "OptimizeABFormationFlow"
     btn.Characters.Text = "AB編成動線最適化を実行"
     btn.Font.Size = 12
