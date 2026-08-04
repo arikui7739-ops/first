@@ -66,12 +66,13 @@ Sub OptimizeABFormationFlow()
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
     Dim ratioSheetName As String: ratioSheetName = "機番回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
+    Dim abSlotCount As Long: abSlotCount = 850 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
     ' ABブロック:AB編成のゾーン対象とする機番範囲(複数ブロック可)。既定は沼南の実際のラック配置(1～30、37～50)
     ' 61～73(Cバラ01)、81～93(Cバラ02)、その他(拡張X)はAB編成のゾーン・スワップ対象外
     Dim abBlockFrom() As Long, abBlockTo() As Long
     Dim abBlockCount As Long
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abBlockFrom, abBlockTo, abBlockCount)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount)
     Dim maxZoneNum As Long: maxZoneNum = GetTotalZoneCount(abBlockFrom, abBlockTo, abBlockCount) ' 全ブロック合計のゾーン数
     Dim maxMachNum As Long: maxMachNum = GetMaxBlockMach(abBlockFrom, abBlockTo, abBlockCount) ' 配列サイズ確保用(最も大きいブロック終了機番)
 
@@ -556,7 +557,7 @@ Sub OptimizeABFormationFlow()
             End If
         End If
 
-        ' KPI記録:AB得意先スコア(理論値:全体の回数上位900アイテムの回数比率／実績値:AB番機の実回数比率)
+        ' KPI記録:AB得意先スコア(理論値:全体の回数上位abSlotCount件(AB間口数)の回数比率／実績値:AB番機の実回数比率)
         Dim abOccupancyScore As Variant: abOccupancyScore = ""
         Dim abTheoreticalRatioOut As Variant: abTheoreticalRatioOut = ""
         Dim abActualRatioOut As Variant: abActualRatioOut = ""
@@ -576,11 +577,11 @@ Sub OptimizeABFormationFlow()
             Dim allN As Long: allN = ar - 1
 
             Dim topSum As Double
-            If allN >= 900 Then
-                ' 回数の多い順に並べ替えて、ちょうど上位900件だけ合計する
-                ' (LARGE+SUMIF(">=")式だと同着タイのロケーションが全部含まれてしまい、900件を超えて合計されることがあるため補正)
+            If allN >= abSlotCount Then
+                ' 回数の多い順に並べ替えて、ちょうど上位abSlotCount件(AB間口数)だけ合計する
+                ' (LARGE+SUMIF(">=")式だと同着タイのロケーションが全部含まれてしまい、間口数を超えて合計されることがあるため補正)
                 wsTempAll.Range("A1:A" & allN).Sort Key1:=wsTempAll.Range("A1"), Order1:=xlDescending, Header:=xlNo
-                topSum = Application.WorksheetFunction.Sum(wsTempAll.Range("A1:A900"))
+                topSum = Application.WorksheetFunction.Sum(wsTempAll.Range("A1:A" & abSlotCount))
             Else
                 topSum = grandTotal
             End If
@@ -966,7 +967,7 @@ End Sub
 
 ' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア(変更前後)を
 ' 「AB編成KPI」シートに記録する。同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
-' abTheoreticalRatio:全体の回数上位900アイテムが占める比率(AB管理の理論上の上限)
+' abTheoreticalRatio:全体の回数上位abSlotCount件(AB間口数)が占める比率(AB管理の理論上の上限)
 ' abActualRatio:ABブロック内の実回数が全体に占める比率(実績)
 ' crossFaceScoreVal:同号機・対面での同時ピッキングを理論上の最小までどれだけ避けられているかのスコア(0～100、高いほど良い)
 ' balanceScoreBefore/After:奇数機番・偶数機番の合計ヒット数がどれだけ均衡しているかのスコア(0～100、100が完全均衡)。変更前(スワップ適用前)と変更後(適用後)を並べて記録する
@@ -1061,6 +1062,10 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K5").Font.Bold = True
     wsSet.Range("L5").Value = 15 ' 「AB編成動線最適化」に出力する入替候補の最大行数
 
+    wsSet.Range("K6").Value = "AB間口数"
+    wsSet.Range("K6").Font.Bold = True
+    wsSet.Range("L6").Value = 850 ' ABの総間口数。AB得意先スコアの理論値(回数上位◯件)算出に使う
+
     wsSet.Range("N3").Value = "■ABブロック"
     wsSet.Range("N3").Font.Bold = True
     wsSet.Range("N4").Value = "開始機番": wsSet.Range("O4").Value = "終了機番"
@@ -1072,7 +1077,7 @@ Sub EnsureExclusionSettingsSheet()
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef abBlockFrom() As Long, ByRef abBlockTo() As Long, ByRef abBlockCount As Long)
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef abSlotCount As Long, ByRef abBlockFrom() As Long, ByRef abBlockTo() As Long, ByRef abBlockCount As Long)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locDanFrom(1 To 1)
@@ -1081,6 +1086,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ReDim locColTo(1 To 1)
     ratioSheetName = "機番回数比"
     maxSwapRows = 15
+    abSlotCount = 850
     ' ABブロックの既定値:沼南の実際のラック配置(1～30、37～50)
     ReDim abBlockFrom(1 To 2): ReDim abBlockTo(1 To 2)
     abBlockFrom(1) = 1: abBlockTo(1) = 30
@@ -1099,6 +1105,11 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     ' 入替候補件数(L5)。1以上の数値が入っていればそれを使う
     If IsNumeric(wsSet.Range("L5").Value) Then
         If CLng(wsSet.Range("L5").Value) >= 1 Then maxSwapRows = CLng(wsSet.Range("L5").Value)
+    End If
+
+    ' AB間口数(L6)。1以上の数値が入っていればそれを使う
+    If IsNumeric(wsSet.Range("L6").Value) Then
+        If CLng(wsSet.Range("L6").Value) >= 1 Then abSlotCount = CLng(wsSet.Range("L6").Value)
     End If
 
     ' ABブロック(N:O列、5行目以降)。データがあれば既定値を上書きする
