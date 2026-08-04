@@ -636,7 +636,8 @@ Sub OptimizeABFormationFlow()
             reportDate = DateSerial(Year(latestFileDate), Month(latestFileDate), Day(latestFileDate))
         End If
         On Error Resume Next
-        Module7.LogFormationScore oddTotalStart, evenTotalStart, oddTotal, evenTotal, crossFaceScore, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
+        ' Module7が無いブックでもコンパイルエラーにならないよう、Application.Runで実行時に解決する
+        Application.Run "Module7.LogFormationScore", oddTotalStart, evenTotalStart, oddTotal, evenTotal, crossFaceScore, abRatioScore, abOccupancyScore, abTheoreticalRatioOut, abActualRatioOut, reportDate
         On Error GoTo 0
 
         Dim completeMsg As String
