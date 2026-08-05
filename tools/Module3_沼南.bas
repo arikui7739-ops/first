@@ -1,6 +1,16 @@
 Attribute VB_Name = "Module3_沼南"
 Option Explicit
 
+' 実績データのキャッシュ(1度読み込んだピッキング実績ファイルを、「設定」シートの条件を変えながら
+' 何度も使い回せるようにする。ブックを閉じるかVBAプロジェクトが再初期化されると空に戻る)
+Private g_DataLoaded As Boolean
+Private g_CachedFormations As Collection ' 編成ごとのCollection。各要素は"号機,段,列"形式の文字列
+Private g_CachedLatestFileDate As Date
+Private g_CachedLatestBDate As Date
+Private g_CachedFileCount As Long
+Private g_CachedDictLocName As Object
+Private g_CachedDictLocCode As Object
+
 Sub OptimizeABFormationFlow()
     Dim fd As Office.FileDialog
     Dim filePath As String
@@ -32,29 +42,36 @@ Sub OptimizeABFormationFlow()
     Dim excludedLocCount As Long: excludedLocCount = 0
     Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary") ' 全ての集計・スワップ対象から除外する品コード
 
-    ' 0. CFシート読込 ロケーション番号と品名・品コードの対応表を作る
-    Dim dictLocName As Object: Set dictLocName = CreateObject("Scripting.Dictionary")
-    Dim dictLocCode As Object: Set dictLocCode = CreateObject("Scripting.Dictionary")
+    Dim dictLocName As Object, dictLocCode As Object
+
+    ' 生データ読込用(キャッシュ再利用時は使わないが、Dimはプロシージャ全体で有効なのでここでまとめて宣言する)
     Dim wsCF As Worksheet
-    On Error Resume Next
-    Set wsCF = ActiveWorkbook.Sheets("CF")
-    On Error GoTo 0
-    If Not wsCF Is Nothing Then
-        Dim lastCF As Long: lastCF = wsCF.Cells(wsCF.Rows.Count, "B").End(xlUp).Row
-        Dim cf As Long
-        For cf = 2 To lastCF
-            Dim locCode As String: locCode = Trim(CStr(wsCF.Cells(cf, 2).Value)) ' B列:ロケーション番号(号機*10000+段*100+列)
-            If locCode <> "" And Not dictLocName.Exists(locCode) Then
-                dictLocName.Add locCode, CStr(wsCF.Cells(cf, 9).Value) ' I列:品名
-                Dim codeVal As Variant
-                If IsNumeric(wsCF.Cells(cf, 8).Value) Then
-                    codeVal = CLng(wsCF.Cells(cf, 8).Value)
-                Else
-                    codeVal = wsCF.Cells(cf, 8).Value
-                End If
-                dictLocCode.Add locCode, codeVal ' H列:品コード
-            End If
-        Next cf
+    Dim lastCF As Long, cf As Long
+    Dim locCode As String, codeVal As Variant
+    Dim fIdx As Long
+    Dim thisFileDate As Date
+    Dim skipMode As Boolean
+    Dim bDateStr As String, bDate As Date
+    Dim slotStart As Long, rec As String
+    Dim mach As Integer, dan As Integer, retsu As Integer
+    Dim itemCodeExcluded As Boolean
+    Dim allLocKey As String
+    Dim zoneNum As Long
+    Dim locKey As String
+    Dim currentFormationRaw As Collection
+
+    ' 0.3 前回読み込んだ実績データが残っていれば、再利用するか確認する
+    ' (「設定」シートの条件だけを変えて何度も試したいときに、ファイル選択をやり直さずに済む)
+    Dim useCache As Boolean: useCache = False
+    Dim latestFileDate As Date, latestBDate As Date, selectedFileCount As Long
+    If g_DataLoaded Then
+        Dim reuseResp As VbMsgBoxResult
+        reuseResp = MsgBox("前回読み込んだ実績データ(" & g_CachedFileCount & "ファイル分)があります。" & vbCrLf & vbCrLf & _
+            "「はい」: ファイルを選び直さず、「設定」シートの現在の内容を反映して再集計する" & vbCrLf & _
+            "「いいえ」: ファイルを選び直す(実績データを更新する場合)", _
+            vbQuestion + vbYesNoCancel, "実績データの再利用")
+        If reuseResp = vbCancel Then Exit Sub
+        useCache = (reuseResp = vbYes)
     End If
 
     ' 0.4 「操作パネル」シート(説明・実行ボタン)が無ければ自動生成する
@@ -64,6 +81,7 @@ Sub OptimizeABFormationFlow()
     Call EnsureKPISheet
 
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
+    ' ※キャッシュ再利用時も、設定の変更を反映するため必ず読み直す
     Dim ratioSheetName As String: ratioSheetName = "号機回数比"
     Dim maxSwapRows As Long: maxSwapRows = 15
     Dim abSlotCount As Long: abSlotCount = 850 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
@@ -76,125 +94,181 @@ Sub OptimizeABFormationFlow()
     Dim maxZoneNum As Long: maxZoneNum = GetTotalZoneCount(abBlockFrom, abBlockTo, abBlockCount) ' 全ブロック合計のゾーン数
     Dim maxMachNum As Long: maxMachNum = GetMaxBlockMach(abBlockFrom, abBlockTo, abBlockCount) ' 配列サイズ確保用(最も大きいブロック終了号機)
 
-    ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
-    Call LoadItemMasterFilesIfSelected(dictLocCode, dictLocName)
+    If useCache Then
+        ' --- キャッシュされた実績データをそのまま使う ---
+        Set dictLocName = g_CachedDictLocName
+        Set dictLocCode = g_CachedDictLocCode
+        latestFileDate = g_CachedLatestFileDate
+        latestBDate = g_CachedLatestBDate
+        selectedFileCount = g_CachedFileCount
 
-    ' 1. ファイル選択(複数選択・全ファイル形式)
-    Set fd = Application.FileDialog(msoFileDialogFilePicker)
-    With fd
-        .Title = "ピッキング実績ファイル(S71で始まるファイル)を選択(複数選択可)"
-        .Filters.Clear
-        .Filters.Add "すべてのファイル", "*.*"
-        .AllowMultiSelect = True
-        If .Show = False Then Exit Sub
-    End With
+        Application.ScreenUpdating = False
+        Application.Calculation = xlCalculationManual
+        Application.EnableEvents = False
+        Application.DisplayAlerts = False
+    Else
+        ' --- ファイルを選び直して読み込む ---
+        Set dictLocName = CreateObject("Scripting.Dictionary")
+        Set dictLocCode = CreateObject("Scripting.Dictionary")
 
-    Application.ScreenUpdating = False
-    Application.Calculation = xlCalculationManual
-    Application.EnableEvents = False
-    Application.DisplayAlerts = False
-
-    ' 2. データの読込(H行6件を1編成として区切り、AB(1～maxMachNum番機、除外設定を反映)を対象に集計)
-    ' 複数編成がファイルをまたがない前提のため、ファイルが変わるたびに前ファイルの端数編成を確定させてリセットする
-    Dim fIdx As Long
-    Dim latestFileDate As Date: latestFileDate = DateSerial(1900, 1, 1) ' ファイル更新日時(B行から日付が読めない場合のフォールバック)
-    Dim latestBDate As Date: latestBDate = DateSerial(1900, 1, 1) ' B行(先頭"B"+8桁日付)から読み取った最も新しい日付
-    For fIdx = 1 To fd.SelectedItems.Count
-        If fIdx > 1 Then
-            Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
-            currentFormationItems.RemoveAll
-            Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
-            currentFormationItemsAll.RemoveAll
-            orderCountInFormation = 0
+        ' 0. CFシート読込 ロケーション番号と品名・品コードの対応表を作る
+        On Error Resume Next
+        Set wsCF = ActiveWorkbook.Sheets("CF")
+        On Error GoTo 0
+        If Not wsCF Is Nothing Then
+            lastCF = wsCF.Cells(wsCF.Rows.Count, "B").End(xlUp).Row
+            For cf = 2 To lastCF
+                locCode = Trim(CStr(wsCF.Cells(cf, 2).Value)) ' B列:ロケーション番号(号機*10000+段*100+列)
+                If locCode <> "" And Not dictLocName.Exists(locCode) Then
+                    dictLocName.Add locCode, CStr(wsCF.Cells(cf, 9).Value) ' I列:品名
+                    If IsNumeric(wsCF.Cells(cf, 8).Value) Then
+                        codeVal = CLng(wsCF.Cells(cf, 8).Value)
+                    Else
+                        codeVal = wsCF.Cells(cf, 8).Value
+                    End If
+                    dictLocCode.Add locCode, codeVal ' H列:品コード
+                End If
+            Next cf
         End If
 
-        filePath = fd.SelectedItems(fIdx)
-        Dim thisFileDate As Date: thisFileDate = FileDateTime(filePath)
-        If thisFileDate > latestFileDate Then latestFileDate = thisFileDate
-        fileNo = FreeFile
-        Dim skipMode As Boolean: skipMode = False ' H99999(棚卸等の在庫サマリー行)配下は読み飛ばす
-        Open filePath For Input As #fileNo
-        Do While Not EOF(fileNo)
-            Line Input #fileNo, textLine
-            If Left(textLine, 1) = "B" And Len(textLine) >= 9 Then
-                ' B行の2～9文字目(8桁)が集計日(YYYYMMDD)
-                Dim bDateStr As String: bDateStr = Mid(textLine, 2, 8)
-                If IsNumeric(bDateStr) Then
-                    Dim bDate As Date
-                    On Error Resume Next
-                    bDate = DateSerial(CInt(Left(bDateStr, 4)), CInt(Mid(bDateStr, 5, 2)), CInt(Mid(bDateStr, 7, 2)))
-                    On Error GoTo 0
-                    If bDate > latestBDate Then latestBDate = bDate
-                End If
-            ElseIf Left(textLine, 1) = "H" Then
-                If Mid(textLine, 2, 5) = "99999" Then
-                    ' 在庫サマリー行。直前の編成を確定させ、以降のE行(在庫全数)はオーダーとして扱わない
-                    Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
-                    currentFormationItems.RemoveAll
-                    Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
-                    currentFormationItemsAll.RemoveAll
-                    skipMode = True
-                Else
-                    skipMode = False
-                    orderCountInFormation = orderCountInFormation + 1
-                    If orderCountInFormation > 6 Then
-                        Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
-                        currentFormationItems.RemoveAll
-                        Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
-                        currentFormationItemsAll.RemoveAll
-                        orderCountInFormation = 1
-                    End If
-                End If
-            ElseIf Left(textLine, 1) = "E" And Len(textLine) >= 10 And Not skipMode Then
-                Dim slotStart As Long
-                For slotStart = 2 To Len(textLine) - 8 Step 13
-                    Dim rec As String: rec = Mid(textLine, slotStart, 9)
-                    If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
-                        Dim mach As Integer, dan As Integer, retsu As Integer
-                        mach = Val(Mid(rec, 1, 2))
-                        dan = Val(Mid(rec, 3, 2))
-                        retsu = Val(Mid(rec, 5, 2))
+        ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
+        Call LoadItemMasterFilesIfSelected(dictLocCode, dictLocName)
 
-                        ' 除外品コード(設定シートで指定)に該当する品は、格納場所を問わず全ての集計・スワップ対象から除く
-                        Dim itemCodeExcluded As Boolean
-                        itemCodeExcluded = IsExcludedItemCode(dictLocCode, dictExcludedItemCode, mach, dan, retsu)
+        ' 1. ファイル選択(複数選択・全ファイル形式)
+        Set fd = Application.FileDialog(msoFileDialogFilePicker)
+        With fd
+            .Title = "ピッキング実績ファイル(S71で始まるファイル)を選択(複数選択可)"
+            .Filters.Clear
+            .Filters.Add "すべてのファイル", "*.*"
+            .AllowMultiSelect = True
+            If .Show = False Then Exit Sub
+        End With
 
-                        ' AB稼働率スコア用:全ゾーン(号機の範囲を問わず)のヒット数を集計(実在番のみ対象)
-                        ' AB上限回数比率・AB実績回数比率は倉庫全体の生データで比較する指標のため、
-                        ' 除外号機・除外ロケーション・除外品コードの設定はここでは適用しない
-                        If mach > 0 Then
-                            Dim allLocKey As String: allLocKey = "M" & Format(mach, "000") & Format(dan, "00") & Format(retsu, "00")
-                            dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
-                        End If
+        Application.ScreenUpdating = False
+        Application.Calculation = xlCalculationManual
+        Application.EnableEvents = False
+        Application.DisplayAlerts = False
 
-                        If IsInABBlock(mach, abBlockFrom, abBlockTo, abBlockCount) Then
-                            Dim zoneNum As Long: zoneNum = ComputeZoneForMach(mach, abBlockFrom, abBlockTo, abBlockCount) ' 1～30番機は1&2→1,3&4→2…29&30→15、37～50番機は37&38→16…49&50→22
-                            Dim locKey As String: locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
-
-                            ' ヒートマップ用:除外号機も含めた全AB番号(除外ロケーション・除外品コードのみ除く)でゾーン・面情報を記録
-                            If Not itemCodeExcluded And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
-                                dictItemZoneAll(locKey) = zoneNum
-                                dictItemMachAll(locKey) = mach
-                                currentFormationItemsAll(locKey) = 1
-                            End If
-
-                            If Not itemCodeExcluded And Not IsExcludedSlot3(dictExcludedMach, mach) And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
-                                dictItemLoc(locKey) = mach & "-" & Format(dan, "00") & "-" & Format(retsu, "00")
-                                dictItemMach(locKey) = mach
-                                dictItemZone(locKey) = zoneNum
-                                dictItemHit(locKey) = dictItemHit(locKey) + 1
-                                currentFormationItems(locKey) = 1
-                            End If
-                        End If
-                    End If
-                Next slotStart
+        ' 2. データの読込(H行6件を1編成として区切り、除外設定は適用せず号機・段・列の生データのまま
+        ' 編成ごとにキャッシュする。除外設定の適用は、この後のキャッシュ集計ステップで毎回行う)
+        ' 複数編成がファイルをまたがない前提のため、ファイルが変わるたびに前ファイルの端数編成を確定させてリセットする
+        Set g_CachedFormations = New Collection
+        Set currentFormationRaw = New Collection
+        orderCountInFormation = 0
+        latestFileDate = DateSerial(1900, 1, 1) ' ファイル更新日時(B行から日付が読めない場合のフォールバック)
+        latestBDate = DateSerial(1900, 1, 1) ' B行(先頭"B"+8桁日付)から読み取った最も新しい日付
+        For fIdx = 1 To fd.SelectedItems.Count
+            If fIdx > 1 Then
+                If currentFormationRaw.Count > 0 Then g_CachedFormations.Add currentFormationRaw
+                Set currentFormationRaw = New Collection
+                orderCountInFormation = 0
             End If
-        Loop
-        Close #fileNo
-    Next fIdx
-    ' 最後の編成(6件に満たない端数を含む)を確定させる
-    Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
-    Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
+
+            filePath = fd.SelectedItems(fIdx)
+            thisFileDate = FileDateTime(filePath)
+            If thisFileDate > latestFileDate Then latestFileDate = thisFileDate
+            fileNo = FreeFile
+            skipMode = False ' H99999(棚卸等の在庫サマリー行)配下は読み飛ばす
+            Open filePath For Input As #fileNo
+            Do While Not EOF(fileNo)
+                Line Input #fileNo, textLine
+                If Left(textLine, 1) = "B" And Len(textLine) >= 9 Then
+                    ' B行の2～9文字目(8桁)が集計日(YYYYMMDD)
+                    bDateStr = Mid(textLine, 2, 8)
+                    If IsNumeric(bDateStr) Then
+                        On Error Resume Next
+                        bDate = DateSerial(CInt(Left(bDateStr, 4)), CInt(Mid(bDateStr, 5, 2)), CInt(Mid(bDateStr, 7, 2)))
+                        On Error GoTo 0
+                        If bDate > latestBDate Then latestBDate = bDate
+                    End If
+                ElseIf Left(textLine, 1) = "H" Then
+                    If Mid(textLine, 2, 5) = "99999" Then
+                        ' 在庫サマリー行。直前の編成を確定させ、以降のE行(在庫全数)はオーダーとして扱わない
+                        If currentFormationRaw.Count > 0 Then g_CachedFormations.Add currentFormationRaw
+                        Set currentFormationRaw = New Collection
+                        skipMode = True
+                    Else
+                        skipMode = False
+                        orderCountInFormation = orderCountInFormation + 1
+                        If orderCountInFormation > 6 Then
+                            If currentFormationRaw.Count > 0 Then g_CachedFormations.Add currentFormationRaw
+                            Set currentFormationRaw = New Collection
+                            orderCountInFormation = 1
+                        End If
+                    End If
+                ElseIf Left(textLine, 1) = "E" And Len(textLine) >= 10 And Not skipMode Then
+                    For slotStart = 2 To Len(textLine) - 8 Step 13
+                        rec = Mid(textLine, slotStart, 9)
+                        If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
+                            mach = Val(Mid(rec, 1, 2))
+                            dan = Val(Mid(rec, 3, 2))
+                            retsu = Val(Mid(rec, 5, 2))
+                            currentFormationRaw.Add mach & "," & dan & "," & retsu
+                        End If
+                    Next slotStart
+                End If
+            Loop
+            Close #fileNo
+        Next fIdx
+        If currentFormationRaw.Count > 0 Then g_CachedFormations.Add currentFormationRaw
+
+        ' 次回実行時に再利用できるよう、生データをキャッシュしておく(ブックを閉じるかVBAが再初期化されるまで有効)
+        selectedFileCount = fd.SelectedItems.Count
+        g_CachedLatestFileDate = latestFileDate
+        g_CachedLatestBDate = latestBDate
+        g_CachedFileCount = selectedFileCount
+        Set g_CachedDictLocName = dictLocName
+        Set g_CachedDictLocCode = dictLocCode
+        g_DataLoaded = True
+    End If
+
+    ' 2.3 キャッシュされた編成データ(号機・段・列の生データ)に、現在の「設定」シートの除外条件・ABブロックを
+    ' 適用しながら集計する。ここで初めて除外設定を反映するため、キャッシュ再利用時も設定変更が正しく反映される
+    Dim formationIter As Variant, recIter As Variant
+    Dim recParts() As String
+    For Each formationIter In g_CachedFormations
+        currentFormationItems.RemoveAll
+        currentFormationItemsAll.RemoveAll
+        For Each recIter In formationIter
+            recParts = Split(CStr(recIter), ",")
+            mach = CInt(recParts(0))
+            dan = CInt(recParts(1))
+            retsu = CInt(recParts(2))
+
+            ' 除外品コード(設定シートで指定)に該当する品は、格納場所を問わず全ての集計・スワップ対象から除く
+            itemCodeExcluded = IsExcludedItemCode(dictLocCode, dictExcludedItemCode, mach, dan, retsu)
+
+            ' AB稼働率スコア用:全ゾーン(号機の範囲を問わず)のヒット数を集計(実在番のみ対象)
+            ' AB上限回数比率・AB実績回数比率は倉庫全体の生データで比較する指標のため、
+            ' 除外号機・除外ロケーション・除外品コードの設定はここでは適用しない
+            If mach > 0 Then
+                allLocKey = "M" & Format(mach, "000") & Format(dan, "00") & Format(retsu, "00")
+                dictAllHit(allLocKey) = dictAllHit(allLocKey) + 1
+            End If
+
+            If IsInABBlock(mach, abBlockFrom, abBlockTo, abBlockCount) Then
+                zoneNum = ComputeZoneForMach(mach, abBlockFrom, abBlockTo, abBlockCount) ' 1～30番機は1&2→1,3&4→2…29&30→15、37～50番機は37&38→16…49&50→22
+                locKey = Format(mach, "00") & Format(dan, "00") & Format(retsu, "00")
+
+                ' ヒートマップ用:除外号機も含めた全AB番号(除外ロケーション・除外品コードのみ除く)でゾーン・面情報を記録
+                If Not itemCodeExcluded And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
+                    dictItemZoneAll(locKey) = zoneNum
+                    dictItemMachAll(locKey) = mach
+                    currentFormationItemsAll(locKey) = 1
+                End If
+
+                If Not itemCodeExcluded And Not IsExcludedSlot3(dictExcludedMach, mach) And Not IsExcludedLocation(mach, dan, retsu, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount) Then
+                    dictItemLoc(locKey) = mach & "-" & Format(dan, "00") & "-" & Format(retsu, "00")
+                    dictItemMach(locKey) = mach
+                    dictItemZone(locKey) = zoneNum
+                    dictItemHit(locKey) = dictItemHit(locKey) + 1
+                    currentFormationItems(locKey) = 1
+                End If
+            End If
+        Next recIter
+        Call RecordZonePairs(currentFormationItems, dictPairs, dictCrossFace, dictItemZone, dictItemMach)
+        Call RecordZonePairs(currentFormationItemsAll, dictPairsAll, dictCrossFaceAll, dictItemZoneAll, dictItemMachAll)
+    Next formationIter
 
     ' 2.5 現在の奇数号機・偶数号機の合計ヒット数を算出(左右バランスの基準値。以降スワップのたびに更新する)
     Dim oddTotal As Double, evenTotal As Double
@@ -857,8 +931,9 @@ Sub OptimizeABFormationFlow()
         Call LogKPI(reportDate, abTheoreticalRatioOut, abActualRatioOut, crossFaceScore, balanceScoreBefore, balanceScoreAfter, balanceScoreBeforeSM, balanceScoreAfterSM)
 
         Dim completeMsg As String
-        completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & fd.SelectedItems.Count & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
+        completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & selectedFileCount & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
             "左右号機の差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0")
+        If useCache Then completeMsg = completeMsg & vbCrLf & "(前回読み込んだ実績データを再利用しました)"
         If abRatioScoreNote <> "" Then completeMsg = completeMsg & vbCrLf & "※" & abRatioScoreNote
         MsgBox completeMsg, vbInformation
     Else
