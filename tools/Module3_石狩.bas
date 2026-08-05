@@ -282,8 +282,19 @@ Sub OptimizeABFormationFlow()
     Next hitKey
     Dim oddTotalStart As Double, evenTotalStart As Double
     oddTotalStart = oddTotal: evenTotalStart = evenTotal
-    Dim grandHitTotal As Double: grandHitTotal = oddTotalStart + evenTotalStart
-    Dim hasTargetRatioData As Boolean: hasTargetRatioData = (dictTargetRatio.Count > 0 And grandHitTotal > 0)
+
+    ' 目標構成比は「設定」シートの合計が100%になっていなくても機番どうしの相対バランスとして扱えるよう、
+    ' 目標比率の合計(targetRatioSum)と、目標が設定されている機番だけの実績ヒット合計(targetedHitStart)で
+    ' それぞれ正規化してから比較する(Cバラ等AB以外への出荷分による絶対値のズレの影響を受けないようにする)
+    Dim targetRatioSum As Double: targetRatioSum = 0
+    Dim targetedHitStart As Double: targetedHitStart = 0
+    Dim trKey As Variant
+    For Each trKey In dictTargetRatio.Keys
+        targetRatioSum = targetRatioSum + dictTargetRatio(trKey)
+        Dim trMach As Long: trMach = CLng(trKey)
+        If trMach >= 1 And trMach <= maxMachNum Then targetedHitStart = targetedHitStart + machHitStart(trMach)
+    Next trKey
+    Dim hasTargetRatioData As Boolean: hasTargetRatioData = (dictTargetRatio.Count > 0 And targetRatioSum > 0 And targetedHitStart > 0)
 
     ' 3. ペアスコアの計算と配列化
     Dim pairArr() As Variant
@@ -380,6 +391,7 @@ Sub OptimizeABFormationFlow()
     For mIdx2 = 1 To maxMachNum
         machHitLive(mIdx2) = machHitStart(mIdx2)
     Next mIdx2
+    Dim targetedHitTotal As Double: targetedHitTotal = targetedHitStart
 
     For r = 1 To pCnt
         If outCnt >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
@@ -397,7 +409,7 @@ Sub OptimizeABFormationFlow()
 
             ' パス1:目標構成比が入力されていれば、最も比率が不足している機番の候補をゾーン利用上限内で探す
             If hasTargetRatioData Then
-                targetItem = FindBestUnderTargetCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictItemMach, dictTargetRatio, machHitLive, grandHitTotal, dictZoneUsedCount, True, MAX_PER_ZONE)
+                targetItem = FindBestUnderTargetCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictItemMach, dictTargetRatio, machHitLive, targetedHitTotal, targetRatioSum, dictZoneUsedCount, True, MAX_PER_ZONE)
             End If
             ' パス1':目標構成比が未入力なら、従来どおり希望サイド+ゾーン利用上限で探す
             If targetItem = "" And Not hasTargetRatioData Then
@@ -465,9 +477,13 @@ Sub OptimizeABFormationFlow()
                     End If
                 End If
 
-                ' 機番別の実績ヒット数を更新(目標構成比を考慮した交換先選定に使う)
+                ' 機番別の実績ヒット数を更新(目標構成比を考慮した交換先選定に使う)。
+                ' targetedHitTotalは目標が設定されている機番だけの合計なので、対象機番が
+                ' 目標未設定→設定 (またはその逆)に移る場合も正しく増減させる
                 Dim mMach As Long: mMach = dictItemMach(mItem)
                 Dim tMach As Long: tMach = dictItemMach(targetItem)
+                If dictTargetRatio.Exists(CStr(mMach)) Then targetedHitTotal = targetedHitTotal - moverHits + targetHits
+                If dictTargetRatio.Exists(CStr(tMach)) Then targetedHitTotal = targetedHitTotal - targetHits + moverHits
                 machHitLive(mMach) = machHitLive(mMach) - moverHits + targetHits
                 machHitLive(tMach) = machHitLive(tMach) - targetHits + moverHits
 
@@ -659,6 +675,7 @@ Sub OptimizeABFormationFlow()
             For mIdx3 = 1 To maxMachNum
                 machHitLiveSM(mIdx3) = machHitStart(mIdx3)
             Next mIdx3
+            Dim targetedHitTotalSM As Double: targetedHitTotalSM = targetedHitStart
 
             Dim rsm As Long
             For rsm = 1 To smCnt
@@ -675,7 +692,7 @@ Sub OptimizeABFormationFlow()
 
                     ' パス1:目標構成比が入力されていれば、最も比率が不足している機番の候補をゾーン利用上限内で探す
                     If hasTargetRatioData Then
-                        targetItemSM = FindBestUnderTargetCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictItemMach, dictTargetRatio, machHitLiveSM, grandHitTotal, dictZoneUsedCountSM, True, MAX_PER_ZONE)
+                        targetItemSM = FindBestUnderTargetCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictItemMach, dictTargetRatio, machHitLiveSM, targetedHitTotalSM, targetRatioSum, dictZoneUsedCountSM, True, MAX_PER_ZONE)
                     End If
                     ' パス1':目標構成比が未入力なら、従来どおり希望サイド+ゾーン利用上限で探す
                     If targetItemSM = "" And Not hasTargetRatioData Then
@@ -743,6 +760,8 @@ Sub OptimizeABFormationFlow()
 
                         Dim mMachSM As Long: mMachSM = dictItemMach(mItemSM)
                         Dim tMachSM As Long: tMachSM = dictItemMach(targetItemSM)
+                        If dictTargetRatio.Exists(CStr(mMachSM)) Then targetedHitTotalSM = targetedHitTotalSM - moverHitsSM + targetHitsSM
+                        If dictTargetRatio.Exists(CStr(tMachSM)) Then targetedHitTotalSM = targetedHitTotalSM - targetHitsSM + moverHitsSM
                         machHitLiveSM(mMachSM) = machHitLiveSM(mMachSM) - moverHitsSM + targetHitsSM
                         machHitLiveSM(tMachSM) = machHitLiveSM(tMachSM) - targetHitsSM + moverHitsSM
 
@@ -998,9 +1017,12 @@ End Sub
 
 ' 交換先候補の中から、目標構成比(設定シート「■機番別目標構成比」)に対して最も不足している
 ' (現在の実績比率と目標比率の差=deviationが最小=マイナス方向に最も大きい)機番の候補を探す。
+' 実績比率・目標比率とも「目標が設定されている機番だけ」の合計(targetedHitTotal/targetRatioSum)で
+' それぞれ正規化してから比較するため、設定シートの目標構成比の合計が100%になっていなくても、
+' 機番どうしの相対バランスとして機能する(Cバラ等AB以外への出荷分の影響も受けない)。
 ' respectZoneLimit=Trueならゾーン利用上限(maxPerZone)を満たすゾーンのみを対象にする。
 ' 該当候補が無ければ空文字を返す(呼び出し側でパス2以降にフォールバックする)
-Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictItemMach As Object, dictTargetRatio As Object, machHitLive() As Double, ByVal grandHitTotal As Double, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer) As String
+Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictItemMach As Object, dictTargetRatio As Object, machHitLive() As Double, ByVal targetedHitTotal As Double, ByVal targetRatioSum As Double, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer) As String
     Dim bestDev As Double: bestDev = 2# ' 比率の差の理論上の最大値(-1～1)より大きい値で初期化
     Dim bestCand As String: bestCand = ""
     Dim zKey As Variant
@@ -1016,7 +1038,7 @@ Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer
                         Dim candMach As Long: candMach = dictItemMach(candStr)
                         Dim candMachKey As String: candMachKey = CStr(candMach)
                         If dictTargetRatio.Exists(candMachKey) Then
-                            Dim dev As Double: dev = (machHitLive(candMach) / grandHitTotal) - dictTargetRatio(candMachKey)
+                            Dim dev As Double: dev = (machHitLive(candMach) / targetedHitTotal) - (dictTargetRatio(candMachKey) / targetRatioSum)
                             If dev < bestDev Then
                                 bestDev = dev
                                 bestCand = candStr
@@ -1324,7 +1346,7 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Columns("N:O").ColumnWidth = 12  ' 機番別目標構成比(機番/目標構成比%)
 
     wsSet.Range("A1:I1").Merge
-    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。④機番別目標構成比:各機番の目標構成比(%)を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先するようになる(未入力ならこれまでどおり奇数偶数バランス優先)。各表の5行目以降に追加・削除して使ってください。"
+    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。④機番別目標構成比:各機番の目標構成比(%)を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先するようになる(未入力ならこれまでどおり奇数偶数バランス優先)。合計が100%になっていなくても、入力した機番どうしの相対バランスとして扱われる(Cバラ等AB以外への出荷分があっても問題ない)。各表の5行目以降に追加・削除して使ってください。"
     wsSet.Range("A1").Font.Bold = True
     wsSet.Range("A1").WrapText = True
     wsSet.Range("A1").VerticalAlignment = xlTop
