@@ -537,7 +537,7 @@ Sub OptimizeABFormationFlow()
 
             ' 編成内共起回数(列2)の降順でソート
             Dim wsTempSM As Worksheet: Set wsTempSM = Sheets.Add
-            wsTempSM.Columns("D:F").NumberFormat = "@"
+            wsTempSM.Columns("C:F").NumberFormat = "@" ' C列(起点品キー)も先頭ゼロ付きの号機を含むため、数値変換されないよう文字列扱いにする
             wsTempSM.Range("A1").Resize(smCnt, 6).Value = smPairArr
             wsTempSM.Sort.SortFields.Clear
             wsTempSM.Sort.SortFields.Add Key:=wsTempSM.Range("B1:B" & smCnt), Order:=xlDescending
