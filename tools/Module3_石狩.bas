@@ -41,6 +41,7 @@ Sub OptimizeABFormationFlow()
     Dim excludedLocMach() As Long, excludedLocDanFrom() As Long, excludedLocDanTo() As Long, excludedLocColFrom() As Long, excludedLocColTo() As Long
     Dim excludedLocCount As Long: excludedLocCount = 0
     Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary") ' 全ての集計・スワップ対象から除外する品コード
+    Dim dictTargetRatio As Object: Set dictTargetRatio = CreateObject("Scripting.Dictionary") ' 機番別目標構成比(機番→0～1の比率)
 
     Dim dictLocName As Object, dictLocCode As Object
 
@@ -84,7 +85,7 @@ Sub OptimizeABFormationFlow()
     Dim maxMachNum As Long: maxMachNum = 46 ' この機番までを集計・スワップ対象の範囲とする(拠点のラック総数に合わせて設定シートで変更可能)
     Dim abSlotCount As Long: abSlotCount = 900 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount)
+    Call LoadExclusionSettings(dictExcludedMach, excludedLocMach, excludedLocDanFrom, excludedLocDanTo, excludedLocColFrom, excludedLocColTo, excludedLocCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount, dictTargetRatio)
     Dim maxZoneNum As Long: maxZoneNum = Int((maxMachNum - 1) / 2) + 1 ' 機番を2台単位で束ねたゾーン数
 
     If useCache Then
@@ -264,18 +265,25 @@ Sub OptimizeABFormationFlow()
     Next formationIter
 
     ' 2.5 現在の奇数機番・偶数機番の合計ヒット数を算出(左右バランスの基準値。以降スワップのたびに更新する)
+    ' 併せて、機番ごとのヒット数(machHitStart)も算出しておく(目標構成比を考慮した交換先選定に使う)
     Dim oddTotal As Double, evenTotal As Double
     oddTotal = 0: evenTotal = 0
+    Dim machHitStart() As Double
+    ReDim machHitStart(1 To maxMachNum)
     Dim hitKey As Variant
     For Each hitKey In dictItemHit.Keys
-        If dictItemMach(hitKey) Mod 2 = 1 Then
+        Dim hkMach As Long: hkMach = dictItemMach(hitKey)
+        If hkMach Mod 2 = 1 Then
             oddTotal = oddTotal + dictItemHit(hitKey)
         Else
             evenTotal = evenTotal + dictItemHit(hitKey)
         End If
+        machHitStart(hkMach) = machHitStart(hkMach) + dictItemHit(hitKey)
     Next hitKey
     Dim oddTotalStart As Double, evenTotalStart As Double
     oddTotalStart = oddTotal: evenTotalStart = evenTotal
+    Dim grandHitTotal As Double: grandHitTotal = oddTotalStart + evenTotalStart
+    Dim hasTargetRatioData As Boolean: hasTargetRatioData = (dictTargetRatio.Count > 0 And grandHitTotal > 0)
 
     ' 3. ペアスコアの計算と配列化
     Dim pairArr() As Variant
@@ -355,13 +363,23 @@ Sub OptimizeABFormationFlow()
         zoneItems(zStr).Add CStr(itemArr(r, 1))
     Next r
 
-    ' 5. 入替案の決定(アンカーとは別ゾーンの低頻度アイテムを交換対象とする)
+    ' 5. 入替案の決定(アンカーとは別ゾーンの低頻度アイテムを交換対象とする。
+    ' 「設定」シートに機番別目標構成比が入力されていれば目標比率への近さを優先し、未入力なら奇数偶数バランスを優先する)
     Dim outArr() As Variant
     ReDim outArr(1 To pCnt, 1 To 13)
     Dim outCnt As Long: outCnt = 0
     Dim dictSwapped As Object: Set dictSwapped = CreateObject("Scripting.Dictionary")
     Dim dictZoneUsedCount As Object: Set dictZoneUsedCount = CreateObject("Scripting.Dictionary") ' 交換先ゾーンの採用回数(偏りを防ぐため)
     Const MAX_PER_ZONE As Integer = 2 ' 同一ゾーンから交換先に採用できる回数の上限
+
+    ' 目標構成比の実績追跡用(このセクション内のスワップのたびに更新する)。目標構成比が未入力なら
+    ' 従来どおり奇数・偶数バランス優先にフォールバックするため、machHitStartをコピーするだけで初期化する
+    Dim machHitLive() As Double
+    ReDim machHitLive(1 To maxMachNum)
+    Dim mIdx2 As Long
+    For mIdx2 = 1 To maxMachNum
+        machHitLive(mIdx2) = machHitStart(mIdx2)
+    Next mIdx2
 
     For r = 1 To pCnt
         If outCnt >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
@@ -373,48 +391,55 @@ Sub OptimizeABFormationFlow()
             Dim anchorZone As Integer: anchorZone = dictItemZone(aItem)
             Dim targetItem As String: targetItem = ""
 
-            ' 奇数・偶数バランスを踏まえた交換先の希望サイドを決定
+            ' 奇数・偶数バランスを踏まえた交換先の希望サイドを決定(目標構成比が未入力の場合のフォールバック用)
             ' ムーバーが「奇数側」にいるなら反対側(偶数)へ、「偶数側」にいるなら同様の側で入替えて偏りを広げないようにする
             Dim moverSide As Integer: moverSide = dictItemMach(mItem) Mod 2 ' 1=奇数, 0=偶数
-            Dim desiredSide As Integer
-            If Abs(oddTotal - evenTotal) <= 0.001 Then
-                desiredSide = -1 ' ほぼ均衡しているのでサイドにこだわらない
-            ElseIf (oddTotal > evenTotal And moverSide = 1) Or (evenTotal > oddTotal And moverSide = 0) Then
-                desiredSide = 1 - moverSide
-            Else
-                desiredSide = moverSide
-            End If
 
-            ' パス1:サイド指定+ゾーン利用上限あり両方満たす/パス2:ゾーン利用上限のみ/パス3:制限なし(最終手段)
-            Dim passNum As Integer
-            For passNum = 1 To 3
-                If targetItem <> "" Then Exit For
-                Dim zKey As Variant
-                For Each zKey In zoneItems.Keys
-                    If CInt(zKey) <> anchorZone Then
-                        Dim zoneUsed As Integer
-                        If dictZoneUsedCount.Exists(zKey) Then zoneUsed = dictZoneUsedCount(zKey) Else zoneUsed = 0
-                        If passNum = 3 Or zoneUsed < MAX_PER_ZONE Then
-                            Dim candidate As Variant
-                            For Each candidate In zoneItems(zKey)
-                                Dim candStr As String: candStr = CStr(candidate)
-                                If candStr <> aItem And candStr <> mItem And Not dictSwapped.Exists(candStr) Then
-                                    If passNum = 1 And desiredSide <> -1 Then
+            ' パス1:目標構成比が入力されていれば、最も比率が不足している機番の候補をゾーン利用上限内で探す
+            If hasTargetRatioData Then
+                targetItem = FindBestUnderTargetCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictItemMach, dictTargetRatio, machHitLive, grandHitTotal, dictZoneUsedCount, True, MAX_PER_ZONE)
+            End If
+            ' パス1':目標構成比が未入力なら、従来どおり希望サイド+ゾーン利用上限で探す
+            If targetItem = "" And Not hasTargetRatioData Then
+                Dim desiredSide As Integer
+                If Abs(oddTotal - evenTotal) <= 0.001 Then
+                    desiredSide = -1 ' ほぼ均衡しているのでサイドにこだわらない
+                ElseIf (oddTotal > evenTotal And moverSide = 1) Or (evenTotal > oddTotal And moverSide = 0) Then
+                    desiredSide = 1 - moverSide
+                Else
+                    desiredSide = moverSide
+                End If
+                If desiredSide <> -1 Then
+                    Dim zKey As Variant
+                    For Each zKey In zoneItems.Keys
+                        If CInt(zKey) <> anchorZone Then
+                            Dim zoneUsed As Integer
+                            If dictZoneUsedCount.Exists(zKey) Then zoneUsed = dictZoneUsedCount(zKey) Else zoneUsed = 0
+                            If zoneUsed < MAX_PER_ZONE Then
+                                Dim candidate As Variant
+                                For Each candidate In zoneItems(zKey)
+                                    Dim candStr As String: candStr = CStr(candidate)
+                                    If candStr <> aItem And candStr <> mItem And Not dictSwapped.Exists(candStr) Then
                                         If dictItemMach(candStr) Mod 2 = desiredSide Then
                                             targetItem = candStr
                                             Exit For
                                         End If
-                                    Else
-                                        targetItem = candStr
-                                        Exit For
                                     End If
-                                End If
-                            Next candidate
+                                Next candidate
+                            End If
                         End If
-                    End If
-                    If targetItem <> "" Then Exit For
-                Next zKey
-            Next passNum
+                        If targetItem <> "" Then Exit For
+                    Next zKey
+                End If
+            End If
+            ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補
+            If targetItem = "" Then
+                targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, True, MAX_PER_ZONE)
+            End If
+            ' パス3:制限なしで、最初に見つかった候補(最終手段)
+            If targetItem = "" Then
+                targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, False, MAX_PER_ZONE)
+            End If
 
             If targetItem <> "" Then
                 ' この交換先ゾーンの利用回数をカウント(偏りの判定に使用)
@@ -425,11 +450,12 @@ Sub OptimizeABFormationFlow()
                     dictZoneUsedCount.Add usedZoneKey, 1
                 End If
 
-                ' 奇数・偶数の合計を更新(サイドが異なる場合のみバランスが変化する)
+                Dim moverHits As Double: moverHits = dictItemHit(mItem)
+                Dim targetHits As Double: targetHits = dictItemHit(targetItem)
+
+                ' 奇数・偶数の合計を更新(サイドが異なる場合のみバランスが変化する。KPI記録用に維持する)
                 Dim targetSide As Integer: targetSide = dictItemMach(targetItem) Mod 2
                 If moverSide <> targetSide Then
-                    Dim moverHits As Double: moverHits = dictItemHit(mItem)
-                    Dim targetHits As Double: targetHits = dictItemHit(targetItem)
                     If moverSide = 1 Then
                         oddTotal = oddTotal - moverHits + targetHits
                         evenTotal = evenTotal - targetHits + moverHits
@@ -438,6 +464,12 @@ Sub OptimizeABFormationFlow()
                         oddTotal = oddTotal - targetHits + moverHits
                     End If
                 End If
+
+                ' 機番別の実績ヒット数を更新(目標構成比を考慮した交換先選定に使う)
+                Dim mMach As Long: mMach = dictItemMach(mItem)
+                Dim tMach As Long: tMach = dictItemMach(targetItem)
+                machHitLive(mMach) = machHitLive(mMach) - moverHits + targetHits
+                machHitLive(tMach) = machHitLive(tMach) - targetHits + moverHits
 
                 outCnt = outCnt + 1
                 outArr(outCnt, 1) = anchorZone
@@ -620,6 +652,14 @@ Sub OptimizeABFormationFlow()
             Dim dictSwappedSM As Object: Set dictSwappedSM = CreateObject("Scripting.Dictionary")
             Dim dictZoneUsedCountSM As Object: Set dictZoneUsedCountSM = CreateObject("Scripting.Dictionary")
 
+            ' このシート専用に、機番別ヒット数もmachHitStartから独立してコピーし直す(本表側のスワップの影響を受けない)
+            Dim machHitLiveSM() As Double
+            ReDim machHitLiveSM(1 To maxMachNum)
+            Dim mIdx3 As Long
+            For mIdx3 = 1 To maxMachNum
+                machHitLiveSM(mIdx3) = machHitStart(mIdx3)
+            Next mIdx3
+
             Dim rsm As Long
             For rsm = 1 To smCnt
                 If outCntSM >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
@@ -632,44 +672,52 @@ Sub OptimizeABFormationFlow()
                     Dim targetItemSM As String: targetItemSM = ""
 
                     Dim moverSideSM As Integer: moverSideSM = dictItemMach(mItemSM) Mod 2
-                    Dim desiredSideSM As Integer
-                    If Abs(oddTotalSM - evenTotalSM) <= 0.001 Then
-                        desiredSideSM = -1
-                    ElseIf (oddTotalSM > evenTotalSM And moverSideSM = 1) Or (evenTotalSM > oddTotalSM And moverSideSM = 0) Then
-                        desiredSideSM = 1 - moverSideSM
-                    Else
-                        desiredSideSM = moverSideSM
-                    End If
 
-                    Dim passNumSM As Integer
-                    For passNumSM = 1 To 3
-                        If targetItemSM <> "" Then Exit For
-                        Dim zKeySM As Variant
-                        For Each zKeySM In zoneItems.Keys
-                            If CInt(zKeySM) <> anchorZoneSM Then
-                                Dim zoneUsedSM As Integer
-                                If dictZoneUsedCountSM.Exists(zKeySM) Then zoneUsedSM = dictZoneUsedCountSM(zKeySM) Else zoneUsedSM = 0
-                                If passNumSM = 3 Or zoneUsedSM < MAX_PER_ZONE Then
-                                    Dim candidateSM As Variant
-                                    For Each candidateSM In zoneItems(zKeySM)
-                                        Dim candStrSM As String: candStrSM = CStr(candidateSM)
-                                        If candStrSM <> aItemSM And candStrSM <> mItemSM And Not dictSwappedSM.Exists(candStrSM) Then
-                                            If passNumSM = 1 And desiredSideSM <> -1 Then
+                    ' パス1:目標構成比が入力されていれば、最も比率が不足している機番の候補をゾーン利用上限内で探す
+                    If hasTargetRatioData Then
+                        targetItemSM = FindBestUnderTargetCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictItemMach, dictTargetRatio, machHitLiveSM, grandHitTotal, dictZoneUsedCountSM, True, MAX_PER_ZONE)
+                    End If
+                    ' パス1':目標構成比が未入力なら、従来どおり希望サイド+ゾーン利用上限で探す
+                    If targetItemSM = "" And Not hasTargetRatioData Then
+                        Dim desiredSideSM As Integer
+                        If Abs(oddTotalSM - evenTotalSM) <= 0.001 Then
+                            desiredSideSM = -1
+                        ElseIf (oddTotalSM > evenTotalSM And moverSideSM = 1) Or (evenTotalSM > oddTotalSM And moverSideSM = 0) Then
+                            desiredSideSM = 1 - moverSideSM
+                        Else
+                            desiredSideSM = moverSideSM
+                        End If
+                        If desiredSideSM <> -1 Then
+                            Dim zKeySM As Variant
+                            For Each zKeySM In zoneItems.Keys
+                                If CInt(zKeySM) <> anchorZoneSM Then
+                                    Dim zoneUsedSM As Integer
+                                    If dictZoneUsedCountSM.Exists(zKeySM) Then zoneUsedSM = dictZoneUsedCountSM(zKeySM) Else zoneUsedSM = 0
+                                    If zoneUsedSM < MAX_PER_ZONE Then
+                                        Dim candidateSM As Variant
+                                        For Each candidateSM In zoneItems(zKeySM)
+                                            Dim candStrSM As String: candStrSM = CStr(candidateSM)
+                                            If candStrSM <> aItemSM And candStrSM <> mItemSM And Not dictSwappedSM.Exists(candStrSM) Then
                                                 If dictItemMach(candStrSM) Mod 2 = desiredSideSM Then
                                                     targetItemSM = candStrSM
                                                     Exit For
                                                 End If
-                                            Else
-                                                targetItemSM = candStrSM
-                                                Exit For
                                             End If
-                                        End If
-                                    Next candidateSM
+                                        Next candidateSM
+                                    End If
                                 End If
-                            End If
-                            If targetItemSM <> "" Then Exit For
-                        Next zKeySM
-                    Next passNumSM
+                                If targetItemSM <> "" Then Exit For
+                            Next zKeySM
+                        End If
+                    End If
+                    ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補
+                    If targetItemSM = "" Then
+                        targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, True, MAX_PER_ZONE)
+                    End If
+                    ' パス3:制限なしで、最初に見つかった候補(最終手段)
+                    If targetItemSM = "" Then
+                        targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, False, MAX_PER_ZONE)
+                    End If
 
                     If targetItemSM <> "" Then
                         Dim usedZoneKeySM As String: usedZoneKeySM = CStr(dictItemZone(targetItemSM))
@@ -679,10 +727,11 @@ Sub OptimizeABFormationFlow()
                             dictZoneUsedCountSM.Add usedZoneKeySM, 1
                         End If
 
+                        Dim moverHitsSM As Double: moverHitsSM = dictItemHit(mItemSM)
+                        Dim targetHitsSM As Double: targetHitsSM = dictItemHit(targetItemSM)
+
                         Dim targetSideSM As Integer: targetSideSM = dictItemMach(targetItemSM) Mod 2
                         If moverSideSM <> targetSideSM Then
-                            Dim moverHitsSM As Double: moverHitsSM = dictItemHit(mItemSM)
-                            Dim targetHitsSM As Double: targetHitsSM = dictItemHit(targetItemSM)
                             If moverSideSM = 1 Then
                                 oddTotalSM = oddTotalSM - moverHitsSM + targetHitsSM
                                 evenTotalSM = evenTotalSM - targetHitsSM + moverHitsSM
@@ -691,6 +740,11 @@ Sub OptimizeABFormationFlow()
                                 oddTotalSM = oddTotalSM - targetHitsSM + moverHitsSM
                             End If
                         End If
+
+                        Dim mMachSM As Long: mMachSM = dictItemMach(mItemSM)
+                        Dim tMachSM As Long: tMachSM = dictItemMach(targetItemSM)
+                        machHitLiveSM(mMachSM) = machHitLiveSM(mMachSM) - moverHitsSM + targetHitsSM
+                        machHitLiveSM(tMachSM) = machHitLiveSM(tMachSM) - targetHitsSM + moverHitsSM
 
                         outCntSM = outCntSM + 1
                         outArrSM(outCntSM, 1) = anchorZoneSM
@@ -942,6 +996,62 @@ Sub RecordZonePairs(currentItems As Object, dictPairs As Object, dictCrossFace A
     Next i
 End Sub
 
+' 交換先候補の中から、目標構成比(設定シート「■機番別目標構成比」)に対して最も不足している
+' (現在の実績比率と目標比率の差=deviationが最小=マイナス方向に最も大きい)機番の候補を探す。
+' respectZoneLimit=Trueならゾーン利用上限(maxPerZone)を満たすゾーンのみを対象にする。
+' 該当候補が無ければ空文字を返す(呼び出し側でパス2以降にフォールバックする)
+Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictItemMach As Object, dictTargetRatio As Object, machHitLive() As Double, ByVal grandHitTotal As Double, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer) As String
+    Dim bestDev As Double: bestDev = 2# ' 比率の差の理論上の最大値(-1～1)より大きい値で初期化
+    Dim bestCand As String: bestCand = ""
+    Dim zKey As Variant
+    For Each zKey In zoneItems.Keys
+        If CInt(zKey) <> anchorZone Then
+            Dim zoneUsed As Integer
+            If dictZoneUsedCount.Exists(zKey) Then zoneUsed = dictZoneUsedCount(zKey) Else zoneUsed = 0
+            If Not respectZoneLimit Or zoneUsed < maxPerZone Then
+                Dim candidate As Variant
+                For Each candidate In zoneItems(zKey)
+                    Dim candStr As String: candStr = CStr(candidate)
+                    If candStr <> excludeItem1 And candStr <> excludeItem2 And Not dictSwapped.Exists(candStr) Then
+                        Dim candMach As Long: candMach = dictItemMach(candStr)
+                        Dim candMachKey As String: candMachKey = CStr(candMach)
+                        If dictTargetRatio.Exists(candMachKey) Then
+                            Dim dev As Double: dev = (machHitLive(candMach) / grandHitTotal) - dictTargetRatio(candMachKey)
+                            If dev < bestDev Then
+                                bestDev = dev
+                                bestCand = candStr
+                            End If
+                        End If
+                    End If
+                Next candidate
+            End If
+        End If
+    Next zKey
+    FindBestUnderTargetCandidate = bestCand
+End Function
+
+' 交換先候補の中から、条件を満たす最初の候補を返す(目標比率を考慮しない従来どおりのフォールバック探索)
+Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer) As String
+    Dim zKey As Variant
+    For Each zKey In zoneItems.Keys
+        If CInt(zKey) <> anchorZone Then
+            Dim zoneUsed As Integer
+            If dictZoneUsedCount.Exists(zKey) Then zoneUsed = dictZoneUsedCount(zKey) Else zoneUsed = 0
+            If Not respectZoneLimit Or zoneUsed < maxPerZone Then
+                Dim candidate As Variant
+                For Each candidate In zoneItems(zKey)
+                    Dim candStr As String: candStr = CStr(candidate)
+                    If candStr <> excludeItem1 And candStr <> excludeItem2 And Not dictSwapped.Exists(candStr) Then
+                        FindFirstCandidate = candStr
+                        Exit Function
+                    End If
+                Next candidate
+            End If
+        End If
+    Next zKey
+    FindFirstCandidate = ""
+End Function
+
 ' 1つのゾーン内で、奇数機番・偶数機番の組み方まで含めて最適配置した場合の
 ' 「理論上最小の対面ヒット数」を局所探索(Kernighan-Linに近い2分割法)で求める。
 ' itemsArr: そのゾーンに属するアイテムキーの配列／dictMach: アイテム→機番／weightDict: "item1,item2"(ソート済)→編成内共起回数
@@ -1169,8 +1279,8 @@ Sub EnsureOperationPanelSheet()
         "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
         "④「AB編成動線最適化」「同号機分散ロケーション変更指示」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
-        "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番・AB間口数などは「設定」シートで変更できます" & _
-        "(シートが無ければ実行時に自動作成されます)。"
+        "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番・AB間口数・機番別目標構成比などは「設定」シートで変更できます" & _
+        "(シートが無ければ実行時に自動作成されます)。機番別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
     wsPanel.Range("B4").VerticalAlignment = xlTop
@@ -1210,9 +1320,11 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Columns("J:J").ColumnWidth = 3   ' 区切り
     wsSet.Columns("K:K").ColumnWidth = 20  ' シート名設定ラベル
     wsSet.Columns("L:L").ColumnWidth = 16  ' シート名設定値
+    wsSet.Columns("M:M").ColumnWidth = 3   ' 区切り
+    wsSet.Columns("N:O").ColumnWidth = 12  ' 機番別目標構成比(機番/目標構成比%)
 
     wsSet.Range("A1:I1").Merge
-    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。各表の5行目以降に追加・削除して使ってください。"
+    wsSet.Range("A1").Value = "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外(CFシートの品コード列と同じ値で指定)。④機番別目標構成比:各機番の目標構成比(%)を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先するようになる(未入力ならこれまでどおり奇数偶数バランス優先)。各表の5行目以降に追加・削除して使ってください。"
     wsSet.Range("A1").Font.Bold = True
     wsSet.Range("A1").WrapText = True
     wsSet.Range("A1").VerticalAlignment = xlTop
@@ -1256,10 +1368,16 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K7").Value = "AB間口数"
     wsSet.Range("K7").Font.Bold = True
     wsSet.Range("L7").Value = 900 ' ABの総間口数。AB得意先スコアの理論値(回数上位◯件)算出に使う
+
+    wsSet.Range("N3").Value = "■機番別目標構成比"
+    wsSet.Range("N3").Font.Bold = True
+    wsSet.Range("N4").Value = "機番": wsSet.Range("O4").Value = "目標構成比(%)"
+    wsSet.Range("N4:O4").Font.Bold = True
+    ' 例:1号機を1.8%、20号機を2.1%にしたい場合はN5=1・O5=1.8、N6=20・O6=2.1のように行を追加する(未入力なら奇数偶数バランス優先のまま)
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
-Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef maxMachNum As Long, ByRef abSlotCount As Long)
+Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, ByRef locDanFrom() As Long, ByRef locDanTo() As Long, ByRef locColFrom() As Long, ByRef locColTo() As Long, ByRef locCount As Long, dictExcludedItemCode As Object, ByRef ratioSheetName As String, ByRef maxSwapRows As Long, ByRef maxMachNum As Long, ByRef abSlotCount As Long, dictTargetRatio As Object)
     locCount = 0
     ReDim locMach(1 To 1)
     ReDim locDanFrom(1 To 1)
@@ -1337,6 +1455,16 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
             If IsNumeric(codeStr) Then dictExcludedItemCode(CStr(CLng(codeStr))) = True
         End If
     Next rI
+
+    ' 機番別目標構成比(N:O列=機番/目標構成比%、5行目以降)。未入力ならdictTargetRatioは空のまま
+    ' (呼び出し側で「未入力なら奇数偶数バランス優先」のフォールバックに使う)
+    Dim lastN As Long: lastN = wsSet.Cells(wsSet.Rows.Count, "N").End(xlUp).Row
+    Dim rN As Long
+    For rN = 5 To lastN
+        If IsNumeric(wsSet.Cells(rN, 14).Value) And IsNumeric(wsSet.Cells(rN, 15).Value) Then
+            dictTargetRatio(CStr(CLng(wsSet.Cells(rN, 14).Value))) = CDbl(wsSet.Cells(rN, 15).Value) / 100
+        End If
+    Next rN
 End Sub
 
 ' 指定の機番・段・列が「除外ロケーション」設定に該当するか判定する(段From/To・列From/Toはそれぞれ両方0なら「全段」「全列」の意味になる)
