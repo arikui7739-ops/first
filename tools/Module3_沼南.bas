@@ -1317,7 +1317,11 @@ Sub EnsureOperationPanelSheet()
         wsPanel.Name = "操作パネル"
     End If
 
-    ' 列幅・タイトル・説明文・ボタン配置は、シートが既にあってもレイアウト変更を反映できるよう毎回更新する
+    ' 列幅・タイトル・説明文・ボタン配置は、シートが既にあってもレイアウト変更を反映できるよう毎回更新する。
+    ' 以前のバージョンで結合されたセル(B4:H18やB4:H40など)が残っていると、形の違う範囲を
+    ' 結合しようとしたときにうまく反映されないことがあるため、先に結合を解除してからやり直す
+    wsPanel.Range("B2:K60").UnMerge
+
     wsPanel.Columns("A:A").ColumnWidth = 3
     wsPanel.Columns("B:F").ColumnWidth = 14 ' 説明文エリア
     wsPanel.Columns("G:G").ColumnWidth = 3  ' 区切り
