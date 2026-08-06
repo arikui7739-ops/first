@@ -3,11 +3,15 @@ Option Explicit
 
 ' ----------------------------------------------------
 ' 構成比グラフの作成
-' 「予測構成比グラフ」:「予測データ」シート(Module8で取込済み)の投入回数_予測を号機別に集計してグラフ化する
-' 「実績構成比グラフ」:ピッキング実績ファイル(S71)をダイアログで選択し、号機別ヒット数を集計してグラフ化する
-' どちらも「設定」シートの「■機番別目標構成比」が入力されていれば、目標比率の系列を並べて比較できるようにする
+' 「予測構成比グラフ」:「予測データ」シート(Module8で取込済み)の投入回数_予測をゾーン別に集計してグラフ化する
+' 「実績構成比グラフ」:ピッキング実績ファイル(S71)をダイアログで選択し、ゾーン別ヒット数を集計してグラフ化する
+' レイアウトは「設定」シートの「■機番別目標構成比」と同じ考え方で、AB01～AB46は機番ペア(ゾーン)ごとに
+' 奇数機番を上向き・偶数機番を下向きに表示し、Cバラ(C01・C02)・拡張(X)は上向きの単独項目として追加する。
+' 「設定」シートに目標構成比が入力されていれば、実績/予測の比率と並べて目標比率も折れ線で比較できるようにする。
 ' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
 ' ----------------------------------------------------
+
+Const MAX_AB_MACH As Long = 46 ' 石狩のAB機番範囲(1～46)。この範囲は奇数/偶数ペアのゾーン表示にする
 
 Sub CreateForecastRatioChart()
     Call EnsureRatioChartButtons
@@ -21,42 +25,38 @@ Sub CreateForecastRatioChart()
         Exit Sub
     End If
 
-    Dim maxMachNum As Long
-    Dim dictTargetRatio As Object
-    Call LoadSettingsForChart(maxMachNum, dictTargetRatio)
+    Dim dictTargetByLabel As Object
+    Call LoadTargetRatioByLabel(dictTargetByLabel)
 
     ' 「予測データ」シートは1行目=取込情報、3行目=見出し(Module8の出力形式)。
-    ' 号機列・投入回数_予測列を見出し名から探す(列の並びが変わっても追随できるようにする)
+    ' ゾーン列(AB01～AB46・C01・C02・Xなどのラベル)・投入回数_予測列を見出し名から探す
     Const HEADER_ROW As Long = 3
     Dim lastRow As Long: lastRow = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).Row
     Dim lastCol As Long: lastCol = wsData.Cells(HEADER_ROW, wsData.Columns.Count).End(xlToLeft).Column
 
-    Dim machColIdx As Long: machColIdx = -1
+    Dim zoneColIdx As Long: zoneColIdx = -1
     Dim cntColIdx As Long: cntColIdx = -1
     Dim hc As Long
     For hc = 1 To lastCol
         Dim hName As String: hName = Trim(CStr(wsData.Cells(HEADER_ROW, hc).Value))
-        If hName = "号機" Then machColIdx = hc
+        If hName = "ゾーン" Then zoneColIdx = hc
         If hName = "投入回数_予測" Then cntColIdx = hc
     Next hc
-    If machColIdx = -1 Or cntColIdx = -1 Then
-        MsgBox "「予測データ」シートに「号機」または「投入回数_予測」の列が見つかりません。", vbExclamation
+    If zoneColIdx = -1 Or cntColIdx = -1 Then
+        MsgBox "「予測データ」シートに「ゾーン」または「投入回数_予測」の列が見つかりません。", vbExclamation
         Exit Sub
     End If
 
-    Dim machTotal() As Double
-    ReDim machTotal(1 To maxMachNum)
+    Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
     Dim r As Long
     For r = HEADER_ROW + 1 To lastRow
-        If IsNumeric(wsData.Cells(r, machColIdx).Value) Then
-            Dim m As Long: m = CLng(wsData.Cells(r, machColIdx).Value)
-            If m >= 1 And m <= maxMachNum Then
-                machTotal(m) = machTotal(m) + Val(wsData.Cells(r, cntColIdx).Value)
-            End If
+        Dim lbl As String: lbl = Trim(CStr(wsData.Cells(r, zoneColIdx).Value))
+        If lbl <> "" Then
+            dictActualByLabel(lbl) = dictActualByLabel(lbl) + Val(wsData.Cells(r, cntColIdx).Value)
         End If
     Next r
 
-    Call BuildRatioChartSheet("予測構成比グラフ", "号機別構成比(予測データ)", machTotal, maxMachNum, dictTargetRatio)
+    Call BuildRatioChartSheet("予測構成比グラフ", "号機別構成比(予測データ)", dictActualByLabel, dictTargetByLabel)
 
     MsgBox "「予測構成比グラフ」を作成しました。", vbInformation
 End Sub
@@ -64,9 +64,40 @@ End Sub
 Sub CreateActualRatioChart()
     Call EnsureRatioChartButtons
 
-    Dim maxMachNum As Long
-    Dim dictTargetRatio As Object
-    Call LoadSettingsForChart(maxMachNum, dictTargetRatio)
+    Dim dictTargetByLabel As Object
+    Call LoadTargetRatioByLabel(dictTargetByLabel)
+
+    ' 機番→ゾーンラベルの対応づけは「予測データ」シート(ゾーン列・機番列を持つ)があればそこから作る。
+    ' 無ければAB01～AB46(機番=ゾーン番号)のみ集計し、Cバラ・拡張(機番だけでは判別できない)は対象外にする
+    Dim dictMachToZone As Object: Set dictMachToZone = CreateObject("Scripting.Dictionary")
+    Dim hasZoneMap As Boolean: hasZoneMap = False
+    Dim wsData As Worksheet
+    On Error Resume Next
+    Set wsData = ThisWorkbook.Sheets("予測データ")
+    On Error GoTo 0
+    If Not wsData Is Nothing Then
+        Const HEADER_ROW2 As Long = 3
+        Dim lastRow2 As Long: lastRow2 = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).Row
+        Dim lastCol2 As Long: lastCol2 = wsData.Cells(HEADER_ROW2, wsData.Columns.Count).End(xlToLeft).Column
+        Dim machColIdx2 As Long: machColIdx2 = -1
+        Dim zoneColIdx2 As Long: zoneColIdx2 = -1
+        Dim hc2 As Long
+        For hc2 = 1 To lastCol2
+            Dim hName2 As String: hName2 = Trim(CStr(wsData.Cells(HEADER_ROW2, hc2).Value))
+            If hName2 = "号機" Then machColIdx2 = hc2
+            If hName2 = "ゾーン" Then zoneColIdx2 = hc2
+        Next hc2
+        If machColIdx2 > 0 And zoneColIdx2 > 0 Then
+            Dim r2 As Long
+            For r2 = HEADER_ROW2 + 1 To lastRow2
+                Dim machKey As String: machKey = Trim(CStr(wsData.Cells(r2, machColIdx2).Value))
+                If machKey <> "" And Not dictMachToZone.Exists(machKey) Then
+                    dictMachToZone(machKey) = Trim(CStr(wsData.Cells(r2, zoneColIdx2).Value))
+                End If
+            Next r2
+            hasZoneMap = (dictMachToZone.Count > 0)
+        End If
+    End If
 
     ' ファイル選択(複数選択・全ファイル形式。Module3と同じくS71実績ファイルを想定)
     Dim fd As Office.FileDialog
@@ -84,9 +115,8 @@ Sub CreateActualRatioChart()
     Application.EnableEvents = False
     Application.DisplayAlerts = False
 
-    ' E行(機番2桁+段2桁+列2桁の9文字区切り)から号機だけを集計する(除外設定・品コードは考慮しない生の実績)
-    Dim machTotal() As Double
-    ReDim machTotal(1 To maxMachNum)
+    ' E行(機番2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)
+    Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
     Dim fIdx As Long, filePath As String, fileNo As Integer, textLine As String
     For fIdx = 1 To fd.SelectedItems.Count
         filePath = fd.SelectedItems(fIdx)
@@ -100,8 +130,15 @@ Sub CreateActualRatioChart()
                     Dim rec As String: rec = Mid(textLine, slotStart, 9)
                     If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
                         Dim mach As Long: mach = Val(Mid(rec, 1, 2))
-                        If mach >= 1 And mach <= maxMachNum Then
-                            machTotal(mach) = machTotal(mach) + 1
+                        Dim machKeyStr As String: machKeyStr = Format(mach, "00")
+                        Dim zoneLbl As String: zoneLbl = ""
+                        If hasZoneMap And dictMachToZone.Exists(machKeyStr) Then
+                            zoneLbl = dictMachToZone(machKeyStr)
+                        ElseIf mach >= 1 And mach <= MAX_AB_MACH Then
+                            zoneLbl = "AB" & Format(mach, "00")
+                        End If
+                        If zoneLbl <> "" Then
+                            dictActualByLabel(zoneLbl) = dictActualByLabel(zoneLbl) + 1
                         End If
                     End If
                 Next slotStart
@@ -110,31 +147,46 @@ Sub CreateActualRatioChart()
         Close #fileNo
     Next fIdx
 
-    Call BuildRatioChartSheet("実績構成比グラフ", "号機別構成比(S71実績)", machTotal, maxMachNum, dictTargetRatio)
+    Call BuildRatioChartSheet("実績構成比グラフ", "号機別構成比(S71実績)", dictActualByLabel, dictTargetByLabel)
 
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
     Application.ScreenUpdating = True
 
-    MsgBox "「実績構成比グラフ」を作成しました。(" & fd.SelectedItems.Count & "ファイル読込)", vbInformation
+    Dim noteMsg As String
+    If Not hasZoneMap Then noteMsg = vbCrLf & "※「予測データ」シートが無いため、Cバラ(C01/C02)・拡張(X)は集計されていません(AB01～AB46のみ)。"
+    MsgBox "「実績構成比グラフ」を作成しました。(" & fd.SelectedItems.Count & "ファイル読込)" & noteMsg, vbInformation
 End Sub
 
-' 「設定」シートから最大機番・機番別目標構成比を読み込む(Module3のプロシージャをそのまま流用する。
-' 除外機番・除外ロケーション等はこのグラフでは使わないので受け皿の変数に読み捨てる)
-Private Sub LoadSettingsForChart(ByRef maxMachNum As Long, ByRef dictTargetRatio As Object)
-    Dim dictExcludedMach As Object: Set dictExcludedMach = CreateObject("Scripting.Dictionary")
-    Dim locMach() As Long, locDanFrom() As Long, locDanTo() As Long, locColFrom() As Long, locColTo() As Long
-    Dim locCount As Long
-    Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary")
-    Dim ratioSheetName As String, maxSwapRows As Long, abSlotCount As Long
-    Set dictTargetRatio = CreateObject("Scripting.Dictionary")
-
+' 「設定」シートの「■機番別目標構成比」(N:O列)を、ラベル文字列をキーにしたまま読み込む
+' (Module3のdictTargetRatioは機番のみ数値キーに正規化されるため、C01・C02・Xを含むグラフ用にはこちらを使う)
+Private Sub LoadTargetRatioByLabel(ByRef dictTargetByLabel As Object)
+    Set dictTargetByLabel = CreateObject("Scripting.Dictionary")
     Call EnsureExclusionSettingsSheet
-    Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount, dictTargetRatio)
+
+    Dim wsSet As Worksheet
+    On Error Resume Next
+    Set wsSet = ThisWorkbook.Sheets("設定")
+    On Error GoTo 0
+    If wsSet Is Nothing Then Exit Sub
+
+    Dim lastN As Long: lastN = wsSet.Cells(wsSet.Rows.Count, "N").End(xlUp).Row
+    Dim rN As Long
+    For rN = 5 To lastN
+        Dim lbl As String: lbl = Trim(CStr(wsSet.Cells(rN, 14).Value))
+        If lbl <> "" And IsNumeric(wsSet.Cells(rN, 15).Value) Then
+            ' 素の数値(1など)で入力されている場合は「AB01」形式に揃えてキーにする(このグラフはラベル単位で集計するため)
+            If IsNumeric(lbl) Then lbl = "AB" & Format(CLng(lbl), "00")
+            dictTargetByLabel(lbl) = CDbl(wsSet.Cells(rN, 15).Value) / 100
+        End If
+    Next rN
 End Sub
 
-' 号機別の合計値(machTotal)から、構成比データ表とグラフを持つシートを作成する(既存の同名シートは削除して作り直す)
-Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As String, machTotal() As Double, ByVal maxMachNum As Long, dictTargetRatio As Object)
+' ゾーンラベル別の実績・目標比率から、データ表とグラフを持つシートを作成する(既存の同名シートは削除して作り直す)。
+' AB01～AB46は機番ペア(ゾーン)ごとに奇数機番を正の値・偶数機番を負の値で持たせ、グラフ上で上下に分かれるようにする
+' (負の値はセルの表示形式でマイナス符号を隠し、絶対値の比率として見せる)。
+' Cバラ(C01・C02)・拡張(X)などAB以外のラベルは、奇数側の列に単独の上向き項目として追加する
+Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As String, dictActualByLabel As Object, dictTargetByLabel As Object)
     On Error Resume Next
     ThisWorkbook.Sheets(sheetName).Delete
     On Error GoTo 0
@@ -151,63 +203,110 @@ Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As 
     End If
     wsOut.Name = sheetName
 
+    ' 全体合計(AB01～AB46 + Cバラ・拡張等その他カテゴリすべて)を比率の分母にする
     Dim grandTotal As Double: grandTotal = 0
-    Dim m As Long
-    For m = 1 To maxMachNum
-        grandTotal = grandTotal + machTotal(m)
-    Next m
+    Dim k As Variant
+    For Each k In dictActualByLabel.Keys
+        grandTotal = grandTotal + dictActualByLabel(k)
+    Next k
+
+    Dim hasTarget As Boolean: hasTarget = (dictTargetByLabel.Count > 0)
 
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 5)).Merge
     wsOut.Cells(1, 1).Value = "【" & chartTitle & "】作成日時: " & Format(Now, "yyyy/mm/dd hh:mm")
     wsOut.Cells(1, 1).Font.Bold = True: wsOut.Cells(1, 1).Font.Size = 12
     wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
-    Dim hasTarget As Boolean: hasTarget = (dictTargetRatio.Count > 0)
-
-    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Value = Array("号機", "合計", "比率", "目標比率", "乖離")
+    Dim headerArr As Variant
+    headerArr = Array("ゾーン", "奇数比率", "偶数比率", "奇数目標比率", "偶数目標比率")
+    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Value = headerArr
     wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Interior.Color = RGB(220, 230, 255)
     wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Font.Bold = True
 
     Dim r As Long: r = 3
-    For m = 1 To maxMachNum
+    Dim zoneCount As Long: zoneCount = MAX_AB_MACH \ 2
+    Dim z As Long
+    For z = 1 To zoneCount
         r = r + 1
-        wsOut.Cells(r, 1).Value = "AB" & Format(m, "00")
-        wsOut.Cells(r, 2).Value = machTotal(m)
-        Dim ratioVal As Double: ratioVal = 0
-        If grandTotal > 0 Then ratioVal = machTotal(m) / grandTotal
-        wsOut.Cells(r, 3).Value = ratioVal
-        wsOut.Cells(r, 3).NumberFormat = "0.0%"
-        If hasTarget And dictTargetRatio.Exists(CStr(m)) Then
-            Dim tRatio As Double: tRatio = dictTargetRatio(CStr(m))
-            wsOut.Cells(r, 4).Value = tRatio
-            wsOut.Cells(r, 4).NumberFormat = "0.0%"
-            wsOut.Cells(r, 5).Value = Abs(ratioVal - tRatio)
-            wsOut.Cells(r, 5).NumberFormat = "0.0%"
-        End If
-    Next m
-    Dim lastDataRow As Long: lastDataRow = r
+        Dim oddMach As Long: oddMach = z * 2 - 1
+        Dim evenMach As Long: evenMach = z * 2
+        Dim oddLabel As String: oddLabel = "AB" & Format(oddMach, "00")
+        Dim evenLabel As String: evenLabel = "AB" & Format(evenMach, "00")
+        wsOut.Cells(r, 1).Value = oddMach & "," & evenMach
 
+        Dim oddVal As Double: oddVal = 0
+        If dictActualByLabel.Exists(oddLabel) Then oddVal = dictActualByLabel(oddLabel)
+        Dim evenVal As Double: evenVal = 0
+        If dictActualByLabel.Exists(evenLabel) Then evenVal = dictActualByLabel(evenLabel)
+
+        wsOut.Cells(r, 2).Value = IIf(grandTotal > 0, oddVal / grandTotal, 0)
+        wsOut.Cells(r, 2).NumberFormat = "0.0%"
+        wsOut.Cells(r, 3).Value = -IIf(grandTotal > 0, evenVal / grandTotal, 0)
+        wsOut.Cells(r, 3).NumberFormat = "0.0%;0.0%"
+
+        If hasTarget Then
+            If dictTargetByLabel.Exists(oddLabel) Then
+                wsOut.Cells(r, 4).Value = dictTargetByLabel(oddLabel)
+                wsOut.Cells(r, 4).NumberFormat = "0.0%"
+            End If
+            If dictTargetByLabel.Exists(evenLabel) Then
+                wsOut.Cells(r, 5).Value = -dictTargetByLabel(evenLabel)
+                wsOut.Cells(r, 5).NumberFormat = "0.0%;0.0%"
+            End If
+        End If
+    Next z
+
+    ' AB以外のラベル(Cバラ・拡張等)を、実績データまたは目標構成比のどちらかに存在するものすべて集めて、
+    ' 奇数側の列に単独の上向き項目として追加する(奇数/偶数のペア概念が無いため偶数側は使わない)
+    Dim dictExtraLabels As Object: Set dictExtraLabels = CreateObject("Scripting.Dictionary")
+    For Each k In dictTargetByLabel.Keys
+        If Not (CStr(k) Like "AB##") Then
+            If Not dictExtraLabels.Exists(CStr(k)) Then dictExtraLabels.Add CStr(k), True
+        End If
+    Next k
+    For Each k In dictActualByLabel.Keys
+        If Not (CStr(k) Like "AB##") Then
+            If Not dictExtraLabels.Exists(CStr(k)) Then dictExtraLabels.Add CStr(k), True
+        End If
+    Next k
+
+    Dim ek As Variant
+    For Each ek In dictExtraLabels.Keys
+        r = r + 1
+        wsOut.Cells(r, 1).Value = CStr(ek)
+        Dim extraVal As Double: extraVal = 0
+        If dictActualByLabel.Exists(ek) Then extraVal = dictActualByLabel(ek)
+        wsOut.Cells(r, 2).Value = IIf(grandTotal > 0, extraVal / grandTotal, 0)
+        wsOut.Cells(r, 2).NumberFormat = "0.0%"
+        If hasTarget And dictTargetByLabel.Exists(ek) Then
+            wsOut.Cells(r, 4).Value = dictTargetByLabel(ek)
+            wsOut.Cells(r, 4).NumberFormat = "0.0%"
+        End If
+    Next ek
+
+    Dim lastDataRow As Long: lastDataRow = r
     wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastDataRow, 5)).Columns.AutoFit
 
-    ' グラフ(号機ごとの比率。目標構成比が入力されていれば目標比率も並べて比較できるようにする)
-    Dim valueRange As Range
-    If hasTarget Then
-        Set valueRange = wsOut.Range(wsOut.Cells(3, 3), wsOut.Cells(lastDataRow, 4))
-    Else
-        Set valueRange = wsOut.Range(wsOut.Cells(3, 3), wsOut.Cells(lastDataRow, 3))
-    End If
-    Dim catRange As Range: Set catRange = wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastDataRow, 1))
+    ' グラフ(奇数機番を上向き・偶数機番を下向きの面グラフで表示。Cバラ・拡張は奇数側に単独の項目として並ぶ。
+    ' 目標構成比が入力されていれば、目標比率を折れ線で重ねて比較できるようにする)
+    Dim srcCols As Long: srcCols = IIf(hasTarget, 5, 3)
+    Dim srcRange As Range: Set srcRange = wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastDataRow, srcCols))
 
     Dim chtObj As ChartObject
-    Set chtObj = wsOut.ChartObjects.Add(wsOut.Cells(3, 7).Left, wsOut.Cells(3, 7).Top, 760, 380)
+    Set chtObj = wsOut.ChartObjects.Add(wsOut.Cells(3, 7).Left, wsOut.Cells(3, 7).Top, 900, 380)
     With chtObj.Chart
-        .SetSourceData Source:=Union(catRange, valueRange)
+        .SetSourceData Source:=srcRange
         .PlotBy = xlColumns
-        .ChartType = xlColumnClustered
+        .ChartType = xlArea
         .HasTitle = True
         .ChartTitle.Text = chartTitle
-        .Axes(xlValue).TickLabels.NumberFormat = "0%"
+        .Axes(xlValue).TickLabels.NumberFormat = "0%;0%"
         .Axes(xlCategory).TickLabels.Font.Size = 7
+        .HasLegend = True
+        If hasTarget Then
+            .SeriesCollection(3).ChartType = xlLineMarkers
+            .SeriesCollection(4).ChartType = xlLineMarkers
+        End If
     End With
 End Sub
 
