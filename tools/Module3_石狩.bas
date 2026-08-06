@@ -1395,6 +1395,10 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K7").Font.Bold = True
     wsSet.Range("L7").Value = 900 ' ABの総間口数。AB得意先スコアの理論値(回数上位◯件)算出に使う
 
+    wsSet.Range("K8").Value = "ロケ変候補件数"
+    wsSet.Range("K8").Font.Bold = True
+    wsSet.Range("L8").Value = 20 ' 「ロケ変指示」(予測データに基づく目標構成比への調整案)に出力する候補の最大件数。入替候補件数(L5)とは別の設定
+
     wsSet.Range("N3").Value = "■機番別目標構成比"
     wsSet.Range("N3").Font.Bold = True
     wsSet.Range("N4").Value = "機番": wsSet.Range("O4").Value = "目標構成比(%)"
