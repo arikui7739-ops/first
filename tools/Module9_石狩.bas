@@ -11,6 +11,9 @@ Option Explicit
 ' データ表にはCバラ・拡張も含めるが、グラフにはAB01～AB46のみを表示する(Cバラ・拡張はグラフの対象外)。
 ' グラフの縦軸目盛りは予測・実績のグラフ間で見比べやすいよう固定スケール(既定は±5%・1%刻み)にし、
 ' 実データがそれを超える場合のみ切り上げて広げる(拠点間でも同じ基準を使う)。
+' 「実績構成比グラフ」の作成と同時に、「日別ロケーション実績」シート(品名コード・ロケ分類・品名・
+' ロケーション・予測回数ごとの日別実績を並べた履歴表)も更新する。日別列はG～Pの最大10列で、
+' 11日目以降は最も古い日(G列)を消して1列ずつ左に詰め、新しい日をP列に追加する。
 ' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
 ' ----------------------------------------------------
 
@@ -120,8 +123,11 @@ Sub CreateActualRatioChart()
     Application.EnableEvents = False
     Application.DisplayAlerts = False
 
-    ' E行(機番2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)
+    ' E行(機番2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)。
+    ' 併せて、機番+段+列単位の実績も集計する(「日別ロケーション実績」の更新に使う)
     Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
+    Dim dictLocationHits As Object: Set dictLocationHits = CreateObject("Scripting.Dictionary")
+    Dim businessDate As Date: businessDate = DateSerial(1900, 1, 1)
     Dim fIdx As Long, filePath As String, fileNo As Integer, textLine As String
     For fIdx = 1 To fd.SelectedItems.Count
         filePath = fd.SelectedItems(fIdx)
@@ -129,12 +135,24 @@ Sub CreateActualRatioChart()
         Open filePath For Input As #fileNo
         Do While Not EOF(fileNo)
             Line Input #fileNo, textLine
-            If Left(textLine, 1) = "E" And Len(textLine) >= 10 Then
+            If Left(textLine, 1) = "B" And Len(textLine) >= 9 Then
+                ' B行の2～9文字目(8桁)が集計日(YYYYMMDD)。「日別ロケーション実績」の日付見出しに使う
+                Dim bDateStr As String: bDateStr = Mid(textLine, 2, 8)
+                If IsNumeric(bDateStr) Then
+                    Dim bDate As Date
+                    On Error Resume Next
+                    bDate = DateSerial(CInt(Left(bDateStr, 4)), CInt(Mid(bDateStr, 5, 2)), CInt(Mid(bDateStr, 7, 2)))
+                    On Error GoTo 0
+                    If bDate > businessDate Then businessDate = bDate
+                End If
+            ElseIf Left(textLine, 1) = "E" And Len(textLine) >= 10 Then
                 Dim slotStart As Long
                 For slotStart = 2 To Len(textLine) - 8 Step 13
                     Dim rec As String: rec = Mid(textLine, slotStart, 9)
                     If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
                         Dim mach As Long: mach = Val(Mid(rec, 1, 2))
+                        Dim dan As Long: dan = Val(Mid(rec, 3, 2))
+                        Dim retsu As Long: retsu = Val(Mid(rec, 5, 2))
                         Dim machKeyStr As String: machKeyStr = Format(mach, "00")
                         Dim zoneLbl As String: zoneLbl = ""
                         If hasZoneMap And dictMachToZone.Exists(machKeyStr) Then
@@ -145,6 +163,9 @@ Sub CreateActualRatioChart()
                         If zoneLbl <> "" Then
                             dictActualByLabel(zoneLbl) = dictActualByLabel(zoneLbl) + 1
                         End If
+
+                        Dim locHitKey As String: locHitKey = machKeyStr & Format(dan, "00") & Format(retsu, "00")
+                        dictLocationHits(locHitKey) = dictLocationHits(locHitKey) + 1
                     End If
                 Next slotStart
             End If
@@ -154,13 +175,16 @@ Sub CreateActualRatioChart()
 
     Call BuildRatioChartSheet("実績構成比グラフ", "号機別構成比(S71実績)", dictActualByLabel, dictTargetByLabel)
 
+    If businessDate = DateSerial(1900, 1, 1) Then businessDate = Date ' B行から日付が読み取れなければ実行日を使う
+    Call UpdateDailyLocationHistory(dictLocationHits, businessDate)
+
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
     Application.ScreenUpdating = True
 
     Dim noteMsg As String
     If Not hasZoneMap Then noteMsg = vbCrLf & "※「予測データ」シートが無いため、Cバラ(C01/C02)・拡張(X)は集計されていません(AB01～AB46のみ)。"
-    MsgBox "「実績構成比グラフ」を作成しました。(" & fd.SelectedItems.Count & "ファイル読込)" & noteMsg, vbInformation
+    MsgBox "「実績構成比グラフ」「日別ロケーション実績」を作成・更新しました。(" & fd.SelectedItems.Count & "ファイル読込)" & noteMsg, vbInformation
 End Sub
 
 ' 「設定」シートの「■機番別目標構成比」(N:O列)を、ラベル文字列をキーにしたまま読み込む
@@ -379,3 +403,183 @@ Sub EnsureRatioChartButtons()
     ' ボタンが下に伸び続けないよう、2列に並び替える(Module3の共通処理)
     Call LayoutPanelButtons
 End Sub
+
+' 「日別ロケーション実績」シートを更新する(「予測データ」の行(品名コード・ロケ分類・品名・ロケーション・予測回数)を
+' 土台にして、日別のS71実績ヒット数(dictLocationHits、機番+段+列キー)を1日分の列として追加する。
+' 日別列はG～Pの最大10列。既に同じ日付の列があればそこを上書きし、10列すべて埋まっていれば
+' 最も古い日(G列)を消して1列ずつ左に詰めてからP列に新しい日を書く。
+' シートは「予測データ」の現在の内容で毎回作り直すが、既存の日別実績はロケーション単位で退避して引き継ぐため、
+' 「予測データ」を再取込みして行が増減しても、過去の日別実績が失われることはない
+Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal businessDate As Date)
+    Dim wsData As Worksheet
+    On Error Resume Next
+    Set wsData = ThisWorkbook.Sheets("予測データ")
+    On Error GoTo 0
+    If wsData Is Nothing Then Exit Sub ' ロケ分類・品名等の元データが無ければ更新しない
+
+    Const HEADER_ROW As Long = 3
+    Dim lastRow As Long: lastRow = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).Row
+    Dim lastCol As Long: lastCol = wsData.Cells(HEADER_ROW, wsData.Columns.Count).End(xlToLeft).Column
+
+    Dim machColIdx As Long: machColIdx = -1
+    Dim danColIdx As Long: danColIdx = -1
+    Dim colColIdx As Long: colColIdx = -1
+    Dim itemCodeColIdx As Long: itemCodeColIdx = -1
+    Dim itemNameColIdx As Long: itemNameColIdx = -1
+    Dim locClassColIdx As Long: locClassColIdx = -1
+    Dim forecastColIdx As Long: forecastColIdx = -1
+    Dim hc As Long
+    For hc = 1 To lastCol
+        Dim hName As String: hName = Trim(CStr(wsData.Cells(HEADER_ROW, hc).Value))
+        If hName = "号機" Then machColIdx = hc
+        If hName = "段" Then danColIdx = hc
+        If hName = "列" Then colColIdx = hc
+        If hName = "品名コード" Then itemCodeColIdx = hc
+        If hName = "品名" Then itemNameColIdx = hc
+        If hName = "ロケ分類" Then locClassColIdx = hc
+        If hName = "投入回数_予測" Then forecastColIdx = hc
+    Next hc
+    If machColIdx = -1 Or danColIdx = -1 Or colColIdx = -1 Or itemCodeColIdx = -1 Then Exit Sub ' 必要な列が無ければ更新しない
+
+    Const DATE_COL_FIRST As Long = 7  ' G列
+    Const DATE_COL_LAST As Long = 16  ' P列(最大10列)
+    Dim histSheetName As String: histSheetName = "日別ロケーション実績"
+
+    ' 既存シートがあれば、日付見出しと日別実績(ロケーションキー→値)を退避しておく
+    Dim wsOut As Worksheet
+    On Error Resume Next
+    Set wsOut = ThisWorkbook.Sheets(histSheetName)
+    On Error GoTo 0
+
+    Dim newHeader As String: newHeader = FormatHistoryDateHeader(businessDate)
+    Dim dateHeaders(DATE_COL_FIRST To DATE_COL_LAST) As String
+    Dim dictOldHistory As Object: Set dictOldHistory = CreateObject("Scripting.Dictionary") ' ロケーション(数値文字列)→10列分の実績配列
+    Dim existingDateCount As Long: existingDateCount = 0
+    Dim overwriteColIdx As Long: overwriteColIdx = -1 ' 同じ日付の列が既にあれば、新規追加せずそこを上書きする
+
+    If Not wsOut Is Nothing Then
+        Dim dc As Long
+        For dc = DATE_COL_FIRST To DATE_COL_LAST
+            Dim hv As String: hv = Trim(CStr(wsOut.Cells(1, dc).Value))
+            dateHeaders(dc) = hv
+            If hv <> "" Then
+                existingDateCount = existingDateCount + 1
+                If hv = newHeader Then overwriteColIdx = dc
+            End If
+        Next dc
+
+        Dim lastOutRow As Long: lastOutRow = wsOut.Cells(wsOut.Rows.Count, 1).End(xlUp).Row
+        If lastOutRow >= 2 Then
+            Dim orow As Long
+            For orow = 2 To lastOutRow
+                Dim oLocKey As String: oLocKey = Trim(CStr(wsOut.Cells(orow, 4).Value))
+                If oLocKey <> "" And Not dictOldHistory.Exists(oLocKey) Then
+                    Dim vals(DATE_COL_FIRST To DATE_COL_LAST) As Variant
+                    For dc = DATE_COL_FIRST To DATE_COL_LAST
+                        vals(dc) = wsOut.Cells(orow, dc).Value
+                    Next dc
+                    dictOldHistory.Add oLocKey, vals
+                End If
+            Next orow
+        End If
+    End If
+
+    ' 今回の日付を書き込む列を決める(同じ日付があれば上書き、無ければ次の空き列。
+    ' 10列すべて埋まっていれば1列分左にシフトしてP列を空ける)
+    Dim targetColIdx As Long
+    If overwriteColIdx > 0 Then
+        targetColIdx = overwriteColIdx
+    ElseIf existingDateCount < (DATE_COL_LAST - DATE_COL_FIRST + 1) Then
+        targetColIdx = DATE_COL_FIRST + existingDateCount
+    Else
+        Dim shiftCol As Long
+        For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
+            dateHeaders(shiftCol) = dateHeaders(shiftCol + 1)
+        Next shiftCol
+        dateHeaders(DATE_COL_LAST) = ""
+
+        Dim shiftKey As Variant
+        For Each shiftKey In dictOldHistory.Keys
+            Dim shiftVals As Variant: shiftVals = dictOldHistory(shiftKey)
+            For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
+                shiftVals(shiftCol) = shiftVals(shiftCol + 1)
+            Next shiftCol
+            shiftVals(DATE_COL_LAST) = Empty
+            dictOldHistory(shiftKey) = shiftVals
+        Next shiftKey
+
+        targetColIdx = DATE_COL_LAST
+    End If
+    dateHeaders(targetColIdx) = newHeader
+
+    ' シートを「予測データ」の現在の内容で作り直す
+    On Error Resume Next
+    ThisWorkbook.Sheets(histSheetName).Delete
+    On Error GoTo 0
+
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If Not wsPanel Is Nothing Then
+        Set wsOut = ThisWorkbook.Sheets.Add(Before:=wsPanel)
+    Else
+        Set wsOut = Sheets.Add
+    End If
+    wsOut.Name = histSheetName
+
+    wsOut.Columns("A:A").NumberFormat = "@" ' コード(先頭ゼロ落ち防止)
+    wsOut.Columns("D:D").NumberFormat = "00\-00\-00" ' ロケーション(機番-段-列表示)
+    wsOut.Columns("F:F").NumberFormat = "@"
+
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 6)).Value = Array("コード", "ロケ分類", "品名", "ロケーション", "予測回数", "行ラベル")
+    For dc = DATE_COL_FIRST To DATE_COL_LAST
+        wsOut.Cells(1, dc).Value = dateHeaders(dc)
+    Next dc
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, DATE_COL_LAST)).Font.Bold = True
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, DATE_COL_LAST)).Interior.Color = RGB(220, 230, 255)
+
+    Dim outRow As Long: outRow = 1
+    Dim r As Long
+    For r = HEADER_ROW + 1 To lastRow
+        If IsNumeric(wsData.Cells(r, machColIdx).Value) And IsNumeric(wsData.Cells(r, danColIdx).Value) And IsNumeric(wsData.Cells(r, colColIdx).Value) Then
+            Dim mach As Long: mach = CLng(wsData.Cells(r, machColIdx).Value)
+            Dim dan As Long: dan = CLng(wsData.Cells(r, danColIdx).Value)
+            Dim colv As Long: colv = CLng(wsData.Cells(r, colColIdx).Value)
+            Dim itemCode As String: itemCode = Trim(CStr(wsData.Cells(r, itemCodeColIdx).Value))
+
+            outRow = outRow + 1
+            wsOut.Cells(outRow, 1).Value = itemCode
+            wsOut.Cells(outRow, 2).Value = IIf(locClassColIdx > 0, Trim(CStr(wsData.Cells(r, locClassColIdx).Value)), "")
+            wsOut.Cells(outRow, 3).Value = IIf(itemNameColIdx > 0, Trim(CStr(wsData.Cells(r, itemNameColIdx).Value)), "")
+            wsOut.Cells(outRow, 4).Value = mach * 10000 + dan * 100 + colv
+            wsOut.Cells(outRow, 5).Value = IIf(forecastColIdx > 0, Val(wsData.Cells(r, forecastColIdx).Value), 0)
+            wsOut.Cells(outRow, 6).Value = itemCode
+
+            Dim rLocKey As String: rLocKey = CStr(mach * 10000 + dan * 100 + colv)
+            Dim eLocKey As String: eLocKey = Format(mach, "00") & Format(dan, "00") & Format(colv, "00")
+            Dim hasOld As Boolean: hasOld = dictOldHistory.Exists(rLocKey)
+            Dim oldVals As Variant
+            If hasOld Then oldVals = dictOldHistory(rLocKey)
+
+            For dc = DATE_COL_FIRST To DATE_COL_LAST
+                If dc = targetColIdx Then
+                    Dim hitVal As Double: hitVal = 0
+                    If dictLocationHits.Exists(eLocKey) Then hitVal = dictLocationHits(eLocKey)
+                    wsOut.Cells(outRow, dc).Value = hitVal
+                ElseIf hasOld Then
+                    If Not IsEmpty(oldVals(dc)) And oldVals(dc) <> "" Then wsOut.Cells(outRow, dc).Value = oldVals(dc)
+                End If
+            Next dc
+        End If
+    Next r
+
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(outRow, DATE_COL_LAST)).Columns.AutoFit
+    wsOut.Range("A1").AutoFilter
+End Sub
+
+' 「日別ロケーション実績」の日付見出しを「7/20(月)」のような表記で返す
+Private Function FormatHistoryDateHeader(ByVal d As Date) As String
+    Dim wdNames As Variant: wdNames = Array("日", "月", "火", "水", "木", "金", "土")
+    FormatHistoryDateHeader = Format(d, "m/d") & "(" & wdNames(Weekday(d) - 1) & ")"
+End Function
