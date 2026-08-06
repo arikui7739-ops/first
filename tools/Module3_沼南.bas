@@ -1377,6 +1377,12 @@ Sub EnsureOperationPanelSheet()
         newBtn.Font.Bold = True
     End If
 
+    ' このマクロだけを実行しても4つのボタンがすべて揃うよう、他モジュールのボタンも一緒に用意する
+    ' (Module8・Module9・Module10は同じVBAプロジェクトに揃っている前提。揃っていないとここでコンパイルエラーになる)
+    Call EnsurePredictionImportButton
+    Call EnsureRatioChartButtons
+    Call EnsureRelocationPlanButton
+
     ' ボタンが下に伸び続けないよう、既存のボタンをすべて2列に並び替える
     ' (Module8・Module9・Module10のEnsure系Subからも毎回呼び出される)
     Call LayoutPanelButtons
