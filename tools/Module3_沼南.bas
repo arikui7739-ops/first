@@ -292,14 +292,18 @@ Sub OptimizeABFormationFlow()
 
     ' 目標構成比は「設定」シートの合計が100%になっていなくても号機どうしの相対バランスとして扱えるよう、
     ' 目標比率の合計(targetRatioSum)と、目標が設定されている号機だけの実績ヒット合計(targetedHitStart)で
-    ' それぞれ正規化してから比較する(Cバラ等AB以外への出荷分による絶対値のズレの影響を受けないようにする)
+    ' それぞれ正規化してから比較する(Cバラ等AB以外への出荷分による絶対値のズレの影響を受けないようにする)。
+    ' 「号機別目標構成比」にはC01・C02・Xのような号機以外のカテゴリ行(構成比グラフ用)が混在することがあるため、
+    ' 数値の号機キーだけをスワップ判定の対象にする(数値以外のキーはCLngでエラーになるため必ず判定してから使う)
     Dim targetRatioSum As Double: targetRatioSum = 0
     Dim targetedHitStart As Double: targetedHitStart = 0
     Dim trKey As Variant
     For Each trKey In dictTargetRatio.Keys
-        targetRatioSum = targetRatioSum + dictTargetRatio(trKey)
-        Dim trMach As Long: trMach = CLng(trKey)
-        If trMach >= 1 And trMach <= maxMachNum Then targetedHitStart = targetedHitStart + machHitStart(trMach)
+        If IsNumeric(trKey) Then
+            targetRatioSum = targetRatioSum + dictTargetRatio(trKey)
+            Dim trMach As Long: trMach = CLng(trKey)
+            If trMach >= 1 And trMach <= maxMachNum Then targetedHitStart = targetedHitStart + machHitStart(trMach)
+        End If
     Next trKey
     Dim hasTargetRatioData As Boolean: hasTargetRatioData = (dictTargetRatio.Count > 0 And targetRatioSum > 0 And targetedHitStart > 0)
 
@@ -1498,7 +1502,8 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("Q3").Font.Bold = True
     wsSet.Range("Q4").Value = "号機": wsSet.Range("R4").Value = "目標構成比(%)"
     wsSet.Range("Q4:R4").Font.Bold = True
-    ' 例:1号機を1.8%、20号機を2.1%にしたい場合はQ5=1・R5=1.8、Q6=20・R6=2.1のように行を追加する(未入力なら奇数偶数バランス優先のまま)
+    ' 「AB01」のような号機ラベル、素の数値、C01・C02・Xのような号機以外のカテゴリラベル(構成比グラフ用)のいずれも入力できる。
+    ' 例:1号機を1.8%にしたい場合はQ5=AB01(またはQ5=1)・R5=1.8のように行を追加する(未入力なら奇数偶数バランス優先のまま)
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外号機・除外品コードの辞書と除外ロケーションの配列、シート名・件数・号機範囲設定を組み立てる
@@ -1608,12 +1613,23 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     Next rI
 
     ' 号機別目標構成比(Q:R列=号機/目標構成比%、5行目以降)。未入力ならdictTargetRatioは空のまま
-    ' (呼び出し側で「未入力なら奇数偶数バランス優先」のフォールバックに使う)
+    ' (呼び出し側で「未入力なら奇数偶数バランス優先」のフォールバックに使う)。
+    ' Q列は「AB01」のような号機ラベル、素の数値(1など)、またはC01・C02・Xのような
+    ' 号機以外のカテゴリラベル(構成比グラフでのみ使う。スワップ判定では無視される)のいずれでもよい
     Dim lastQ As Long: lastQ = wsSet.Cells(wsSet.Rows.Count, "Q").End(xlUp).Row
     Dim rQ As Long
     For rQ = 5 To lastQ
-        If IsNumeric(wsSet.Cells(rQ, 17).Value) And IsNumeric(wsSet.Cells(rQ, 18).Value) Then
-            dictTargetRatio(CStr(CLng(wsSet.Cells(rQ, 17).Value))) = CDbl(wsSet.Cells(rQ, 18).Value) / 100
+        Dim trLabel As String: trLabel = Trim(CStr(wsSet.Cells(rQ, 17).Value))
+        If trLabel <> "" And IsNumeric(wsSet.Cells(rQ, 18).Value) Then
+            Dim trKeyStr As String
+            If trLabel Like "AB##" Then
+                trKeyStr = CStr(CInt(Mid(trLabel, 3, 2))) ' 「AB01」→「1」
+            ElseIf IsNumeric(trLabel) Then
+                trKeyStr = CStr(CLng(trLabel)) ' 素の数値がそのまま入っている場合(従来形式)
+            Else
+                trKeyStr = trLabel ' C01・C02・Xなど号機以外のカテゴリはラベルのままキーにする
+            End If
+            dictTargetRatio(trKeyStr) = CDbl(wsSet.Cells(rQ, 18).Value) / 100
         End If
     Next rQ
 End Sub
