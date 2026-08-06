@@ -1315,55 +1315,62 @@ Sub EnsureOperationPanelSheet()
     If wsPanel Is Nothing Then
         Set wsPanel = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
         wsPanel.Name = "操作パネル"
+    End If
 
-        wsPanel.Columns("A:A").ColumnWidth = 3
-        wsPanel.Columns("B:F").ColumnWidth = 14 ' 説明文エリア
-        wsPanel.Columns("G:G").ColumnWidth = 3  ' 区切り
-        wsPanel.Columns("H:K").ColumnWidth = 14 ' ボタン配置エリア(説明文の右側)
+    ' 列幅・タイトル・説明文・ボタン配置は、シートが既にあってもレイアウト変更を反映できるよう毎回更新する
+    wsPanel.Columns("A:A").ColumnWidth = 3
+    wsPanel.Columns("B:F").ColumnWidth = 14 ' 説明文エリア
+    wsPanel.Columns("G:G").ColumnWidth = 3  ' 区切り
+    wsPanel.Columns("H:K").ColumnWidth = 14 ' ボタン配置エリア(説明文の右側)
 
-        wsPanel.Range("B2:K2").Merge
-        wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
-        wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
-        wsPanel.Range("B2").HorizontalAlignment = xlLeft
+    wsPanel.Range("B2:K2").Merge
+    wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
+    wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
+    wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
-        wsPanel.Range("B4:F55").Merge
-        wsPanel.Range("B4").Value = _
-            "このワークブックには、AB(自動倉庫ラック)編成の動線最適化に関する4つのマクロが入っています。" & _
-            "①AB編成動線最適化(Module3):ピッキング実績ログを解析し、同一号機・同一ゾーン(対面)で同時に出庫されやすい" & _
-            "商品同士を検出して、別ゾーンへ分散配置し直す入替候補を提案します。" & _
-            "②予測データ取込(Module8):WMS等から出力した予測データCSVを取り込みます。③④の元データになります。" & _
-            "③構成比グラフ(Module9):予測データ・実績(S71)それぞれの号機別構成比を、目標構成比と比較できるグラフを" & _
-            "作成します。実績側は「日別ロケーション実績」の履歴も自動更新します。" & _
-            "④ロケ変指示(Module10):予測データを元に、号機別構成比を目標構成比に近づけるロケーション入替指示を" & _
-            "作成します(同じ段の中でのみ入替えます)。" & vbCrLf & vbCrLf & _
-            "【空のワークブックで初めて使うとき】" & vbCrLf & _
-            "①VBEでこの4つのモジュール(Module3_沼南・Module8_沼南・Module9_沼南・Module10_沼南、またはModule3～10)を" & _
-            "「ファイルのインポート」で追加する" & vbCrLf & _
-            "②いずれかのマクロを一度実行する(下の「AB編成動線最適化を実行」ボタンでよい。ファイル選択はキャンセルして" & _
-            "かまわない)。これで本シートと「設定」シートが自動作成され、以降すべてのボタンが使えるようになる" & vbCrLf & _
-            "③「設定」シートの■ABブロック(沼南の号機範囲)と■号機別目標構成比を、実際のラック配置・目標値に合わせて" & _
-            "入力する" & vbCrLf & vbCrLf & _
-            "【使う順番の目安】" & vbCrLf & _
-            "①「予測データを取り込む」でCSVを取り込む(②の一部・③④の前提)" & vbCrLf & _
-            "②「AB編成動線最適化を実行」でピッキング実績ファイル(S71)を解析(品名マスタ・ロケーションマスタは任意)" & vbCrLf & _
-            "③「予測構成比グラフを作成」「実績構成比グラフを作成」でグラフを作成(実績側はS71ファイルが必要)" & vbCrLf & _
-            "④「ロケ変指示を作成」でロケ変指示を作成(予測データの取込と、「設定」シートの■号機別目標構成比の入力が必要)" & vbCrLf & vbCrLf & _
-            "【カスタマイズ】" & vbCrLf & _
-            "除外号機・除外ロケーション・除外品コード・号機回数比シート名・入替候補件数・ロケ変候補件数・AB間口数・" & _
-            "ABブロック・号機別目標構成比などは「設定」シートで変更できます(シートが無ければ実行時に自動作成されます)。" & _
-            "号機別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
-        wsPanel.Range("B4").Font.Size = 11
-        wsPanel.Range("B4").WrapText = True
-        wsPanel.Range("B4").VerticalAlignment = xlTop
-        wsPanel.Rows("4:55").RowHeight = 18
+    wsPanel.Range("B4:F55").Merge
+    wsPanel.Range("B4").Value = _
+        "このワークブックには、AB(自動倉庫ラック)編成の動線最適化に関する4つのマクロが入っています。" & _
+        "①AB編成動線最適化(Module3):ピッキング実績ログを解析し、同一号機・同一ゾーン(対面)で同時に出庫されやすい" & _
+        "商品同士を検出して、別ゾーンへ分散配置し直す入替候補を提案します。" & _
+        "②予測データ取込(Module8):WMS等から出力した予測データCSVを取り込みます。③④の元データになります。" & _
+        "③構成比グラフ(Module9):予測データ・実績(S71)それぞれの号機別構成比を、目標構成比と比較できるグラフを" & _
+        "作成します。実績側は「日別ロケーション実績」の履歴も自動更新します。" & _
+        "④ロケ変指示(Module10):予測データを元に、号機別構成比を目標構成比に近づけるロケーション入替指示を" & _
+        "作成します(同じ段の中でのみ入替えます)。" & vbCrLf & vbCrLf & _
+        "【空のワークブックで初めて使うとき】" & vbCrLf & _
+        "①VBEでこの4つのモジュール(Module3_沼南・Module8_沼南・Module9_沼南・Module10_沼南、またはModule3～10)を" & _
+        "「ファイルのインポート」で追加する" & vbCrLf & _
+        "②いずれかのマクロを一度実行する(右の「AB編成動線最適化を実行」ボタンでよい。ファイル選択はキャンセルして" & _
+        "かまわない)。これで本シートと「設定」シートが自動作成され、以降すべてのボタンが使えるようになる" & vbCrLf & _
+        "③「設定」シートの■ABブロック(沼南の号機範囲)と■号機別目標構成比を、実際のラック配置・目標値に合わせて" & _
+        "入力する" & vbCrLf & vbCrLf & _
+        "【使う順番の目安】" & vbCrLf & _
+        "①「予測データを取り込む」でCSVを取り込む(②の一部・③④の前提)" & vbCrLf & _
+        "②「AB編成動線最適化を実行」でピッキング実績ファイル(S71)を解析(品名マスタ・ロケーションマスタは任意)" & vbCrLf & _
+        "③「予測構成比グラフを作成」「実績構成比グラフを作成」でグラフを作成(実績側はS71ファイルが必要)" & vbCrLf & _
+        "④「ロケ変指示を作成」でロケ変指示を作成(予測データの取込と、「設定」シートの■号機別目標構成比の入力が必要)" & vbCrLf & vbCrLf & _
+        "【カスタマイズ】" & vbCrLf & _
+        "除外号機・除外ロケーション・除外品コード・号機回数比シート名・入替候補件数・ロケ変候補件数・AB間口数・" & _
+        "ABブロック・号機別目標構成比などは「設定」シートで変更できます(シートが無ければ実行時に自動作成されます)。" & _
+        "号機別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
+    wsPanel.Range("B4").Font.Size = 11
+    wsPanel.Range("B4").WrapText = True
+    wsPanel.Range("B4").VerticalAlignment = xlTop
+    wsPanel.Rows("4:55").RowHeight = 18
 
-        Dim btn As Button
-        Set btn = wsPanel.Buttons.Add(wsPanel.Range("H4").Left, wsPanel.Range("H4").Top, 220, 36)
-        btn.Name = "AB編成動線最適化ボタン"
-        btn.OnAction = "OptimizeABFormationFlow"
-        btn.Characters.Text = "AB編成動線最適化を実行"
-        btn.Font.Size = 12
-        btn.Font.Bold = True
+    Dim btn As Shape
+    On Error Resume Next
+    Set btn = wsPanel.Shapes("AB編成動線最適化ボタン")
+    On Error GoTo 0
+    If btn Is Nothing Then
+        Dim newBtn As Button
+        Set newBtn = wsPanel.Buttons.Add(wsPanel.Range("H4").Left, wsPanel.Range("H4").Top, 220, 36)
+        newBtn.Name = "AB編成動線最適化ボタン"
+        newBtn.OnAction = "OptimizeABFormationFlow"
+        newBtn.Characters.Text = "AB編成動線最適化を実行"
+        newBtn.Font.Size = 12
+        newBtn.Font.Bold = True
     End If
 
     ' ボタンが下に伸び続けないよう、既存のボタンをすべて2列に並び替える
