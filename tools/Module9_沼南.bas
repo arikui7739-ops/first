@@ -384,8 +384,10 @@ End Sub
 
 ' 「日別ロケーション実績」シートを更新する(「予測データ」の行(品名コード・ロケ分類・品名・ロケーション・予測回数)を
 ' 土台にして、日別のS71実績ヒット数(dictLocationHits、号機+段+列キー)を1日分の列として追加する。
+' 「予測データ」に無いロケーションでS71実績があった場合は、品名・ロケ分類を不明のまま行を追加する。
 ' 日別列はG～Pの最大10列。既に同じ日付の列があればそこを上書きし、10列すべて埋まっていれば
-' 最も古い日(G列)を消して1列ずつ左に詰めてからP列に新しい日を書く。
+' 最も古い日(G列)を消して1列ずつ左に詰めてからP列に新しい日を書く。日別列の右端(Q列)には
+' その行の日別実績の総計を書く。
 ' シートは「予測データ」の現在の内容で毎回作り直すが、既存の日別実績はロケーション単位で退避して引き継ぐため、
 ' 「予測データ」を再取込みして行が増減しても、過去の日別実績が失われることはない
 Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal businessDate As Date)
@@ -421,6 +423,7 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
 
     Const DATE_COL_FIRST As Long = 7  ' G列
     Const DATE_COL_LAST As Long = 16  ' P列(最大10列)
+    Const TOTAL_COL As Long = 17      ' Q列(日別実績の総計)
     Dim histSheetName As String: histSheetName = "日別ロケーション実績"
 
     ' 既存シートがあれば、日付見出しと日別実績(ロケーションキー→値)を退避しておく
@@ -514,10 +517,12 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
     For dc = DATE_COL_FIRST To DATE_COL_LAST
         wsOut.Cells(1, dc).Value = dateHeaders(dc)
     Next dc
-    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, DATE_COL_LAST)).Font.Bold = True
-    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, DATE_COL_LAST)).Interior.Color = RGB(220, 230, 255)
+    wsOut.Cells(1, TOTAL_COL).Value = "総計"
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Font.Bold = True
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Interior.Color = RGB(220, 230, 255)
 
     Dim outRow As Long: outRow = 1
+    Dim dictCoveredLocKeys As Object: Set dictCoveredLocKeys = CreateObject("Scripting.Dictionary") ' 「予測データ」でカバー済みのロケーション(号機+段+列キー)
     Dim r As Long
     For r = HEADER_ROW + 1 To lastRow
         If IsNumeric(wsData.Cells(r, machColIdx).Value) And IsNumeric(wsData.Cells(r, danColIdx).Value) And IsNumeric(wsData.Cells(r, colColIdx).Value) Then
@@ -536,24 +541,63 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
 
             Dim rLocKey As String: rLocKey = CStr(mach * 10000 + dan * 100 + colv)
             Dim eLocKey As String: eLocKey = Format(mach, "00") & Format(dan, "00") & Format(colv, "00")
-            Dim hasOld As Boolean: hasOld = dictOldHistory.Exists(rLocKey)
-            Dim oldVals As Variant
-            If hasOld Then oldVals = dictOldHistory(rLocKey)
+            If Not dictCoveredLocKeys.Exists(eLocKey) Then dictCoveredLocKeys.Add eLocKey, True
 
-            For dc = DATE_COL_FIRST To DATE_COL_LAST
-                If dc = targetColIdx Then
-                    Dim hitVal As Double: hitVal = 0
-                    If dictLocationHits.Exists(eLocKey) Then hitVal = dictLocationHits(eLocKey)
-                    wsOut.Cells(outRow, dc).Value = hitVal
-                ElseIf hasOld Then
-                    If Not IsEmpty(oldVals(dc)) And oldVals(dc) <> "" Then wsOut.Cells(outRow, dc).Value = oldVals(dc)
-                End If
-            Next dc
+            Call WriteDailyValues(wsOut, outRow, eLocKey, rLocKey, dictLocationHits, dictOldHistory, targetColIdx, DATE_COL_FIRST, DATE_COL_LAST, TOTAL_COL)
         End If
     Next r
 
-    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(outRow, DATE_COL_LAST)).Columns.AutoFit
+    ' 「予測データ」に無いロケーションでS71実績があった場合は、品名・ロケ分類を不明のまま行を追加する
+    Dim extraKey As Variant
+    For Each extraKey In dictLocationHits.Keys
+        Dim exKeyStr As String: exKeyStr = CStr(extraKey)
+        If Not dictCoveredLocKeys.Exists(exKeyStr) And Len(exKeyStr) = 6 Then
+            Dim exMach As Long: exMach = CLng(Mid(exKeyStr, 1, 2))
+            Dim exDan As Long: exDan = CLng(Mid(exKeyStr, 3, 2))
+            Dim exCol As Long: exCol = CLng(Mid(exKeyStr, 5, 2))
+            Dim exRLocKey As String: exRLocKey = CStr(exMach * 10000 + exDan * 100 + exCol)
+
+            outRow = outRow + 1
+            wsOut.Cells(outRow, 1).Value = ""
+            wsOut.Cells(outRow, 2).Value = ""
+            wsOut.Cells(outRow, 3).Value = "(品名不明)"
+            wsOut.Cells(outRow, 4).Value = exMach * 10000 + exDan * 100 + exCol
+            wsOut.Cells(outRow, 5).Value = 0
+            wsOut.Cells(outRow, 6).Value = ""
+
+            Call WriteDailyValues(wsOut, outRow, exKeyStr, exRLocKey, dictLocationHits, dictOldHistory, targetColIdx, DATE_COL_FIRST, DATE_COL_LAST, TOTAL_COL)
+        End If
+    Next extraKey
+
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(outRow, TOTAL_COL)).Columns.AutoFit
     wsOut.Range("A1").AutoFilter
+End Sub
+
+' 「日別ロケーション実績」の1行分について、日別列(dateColFirst～dateColLast)に実績値を書き込み、
+' 総計列(totalCol)にその合計を書く。targetColIdxの列には今回のdictLocationHitsの値、
+' それ以外の列は退避しておいたdictOldHistory(過去の実績)の値をそのまま引き継ぐ
+Private Sub WriteDailyValues(ByVal wsOut As Worksheet, ByVal outRow As Long, ByVal eLocKey As String, ByVal rLocKey As String, dictLocationHits As Object, dictOldHistory As Object, ByVal targetColIdx As Long, ByVal dateColFirst As Long, ByVal dateColLast As Long, ByVal totalCol As Long)
+    Dim hasOld As Boolean: hasOld = dictOldHistory.Exists(rLocKey)
+    Dim oldVals As Variant
+    If hasOld Then oldVals = dictOldHistory(rLocKey)
+
+    Dim totalVal As Double: totalVal = 0
+    Dim dc As Long
+    For dc = dateColFirst To dateColLast
+        Dim cellVal As Variant: cellVal = Empty
+        If dc = targetColIdx Then
+            Dim hitVal As Double: hitVal = 0
+            If dictLocationHits.Exists(eLocKey) Then hitVal = dictLocationHits(eLocKey)
+            cellVal = hitVal
+        ElseIf hasOld Then
+            If Not IsEmpty(oldVals(dc)) And oldVals(dc) <> "" Then cellVal = oldVals(dc)
+        End If
+        If Not IsEmpty(cellVal) Then
+            wsOut.Cells(outRow, dc).Value = cellVal
+            If IsNumeric(cellVal) Then totalVal = totalVal + CDbl(cellVal)
+        End If
+    Next dc
+    wsOut.Cells(outRow, totalCol).Value = totalVal
 End Sub
 
 ' 「日別ロケーション実績」の日付見出しを「7/20(月)」のような表記で返す
