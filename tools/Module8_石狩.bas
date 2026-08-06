@@ -159,20 +159,16 @@ Sub EnsurePredictionImportButton()
     On Error Resume Next
     Set existing = wsPanel.Shapes("予測データ取込ボタン")
     On Error GoTo 0
-    If Not existing Is Nothing Then Exit Sub
+    If existing Is Nothing Then
+        Dim btn As Button
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
+        btn.Name = "予測データ取込ボタン"
+        btn.OnAction = "ImportPredictionData"
+        btn.Characters.Text = "予測データを取り込む"
+        btn.Font.Size = 12
+        btn.Font.Bold = True
+    End If
 
-    Dim maxBottom As Double: maxBottom = 0
-    Dim shp As Shape
-    For Each shp In wsPanel.Shapes
-        If shp.Top + shp.Height > maxBottom Then maxBottom = shp.Top + shp.Height
-    Next shp
-    If maxBottom = 0 Then maxBottom = wsPanel.Range("B20").Top
-
-    Dim btn As Button
-    Set btn = wsPanel.Buttons.Add(wsPanel.Range("B2").Left, maxBottom + 16, 220, 36)
-    btn.Name = "予測データ取込ボタン"
-    btn.OnAction = "ImportPredictionData"
-    btn.Characters.Text = "予測データを取り込む"
-    btn.Font.Size = 12
-    btn.Font.Bold = True
+    ' ボタンが下に伸び続けないよう、2列に並び替える(Module3の共通処理)
+    Call LayoutPanelButtons
 End Sub

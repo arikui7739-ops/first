@@ -347,13 +347,6 @@ Sub EnsureRatioChartButtons()
     On Error GoTo 0
     If wsPanel Is Nothing Then Exit Sub
 
-    Dim maxBottom As Double: maxBottom = 0
-    Dim shp As Shape
-    For Each shp In wsPanel.Shapes
-        If shp.Top + shp.Height > maxBottom Then maxBottom = shp.Top + shp.Height
-    Next shp
-    If maxBottom = 0 Then maxBottom = wsPanel.Range("B20").Top
-
     Dim existing As Shape
 
     On Error Resume Next
@@ -361,13 +354,12 @@ Sub EnsureRatioChartButtons()
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn1 As Button
-        Set btn1 = wsPanel.Buttons.Add(wsPanel.Range("B2").Left, maxBottom + 16, 220, 36)
+        Set btn1 = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
         btn1.Name = "予測構成比グラフボタン"
         btn1.OnAction = "CreateForecastRatioChart"
         btn1.Characters.Text = "予測構成比グラフを作成"
         btn1.Font.Size = 12
         btn1.Font.Bold = True
-        maxBottom = maxBottom + 16 + 36
     End If
 
     Set existing = Nothing
@@ -376,11 +368,14 @@ Sub EnsureRatioChartButtons()
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn2 As Button
-        Set btn2 = wsPanel.Buttons.Add(wsPanel.Range("B2").Left, maxBottom + 16, 220, 36)
+        Set btn2 = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
         btn2.Name = "実績構成比グラフボタン"
         btn2.OnAction = "CreateActualRatioChart"
         btn2.Characters.Text = "実績構成比グラフを作成"
         btn2.Font.Size = 12
         btn2.Font.Bold = True
     End If
+
+    ' ボタンが下に伸び続けないよう、2列に並び替える(Module3の共通処理)
+    Call LayoutPanelButtons
 End Sub

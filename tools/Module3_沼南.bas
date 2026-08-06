@@ -1312,43 +1312,84 @@ Sub EnsureOperationPanelSheet()
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
-    If Not wsPanel Is Nothing Then Exit Sub
+    If wsPanel Is Nothing Then
+        Set wsPanel = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
+        wsPanel.Name = "操作パネル"
 
-    Set wsPanel = ThisWorkbook.Sheets.Add(Before:=ThisWorkbook.Sheets(1))
-    wsPanel.Name = "操作パネル"
+        wsPanel.Columns("A:A").ColumnWidth = 3
+        wsPanel.Columns("B:H").ColumnWidth = 14
 
-    wsPanel.Columns("A:A").ColumnWidth = 3
-    wsPanel.Columns("B:H").ColumnWidth = 14
+        wsPanel.Range("B2:H2").Merge
+        wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
+        wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
+        wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
-    wsPanel.Range("B2:H2").Merge
-    wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
-    wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
-    wsPanel.Range("B2").HorizontalAlignment = xlLeft
+        wsPanel.Range("B4:H18").Merge
+        wsPanel.Range("B4").Value = _
+            "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同一号機・同一ゾーン(対面)で" & _
+            "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案するツールです。" & _
+            "同時ピッキングの集中を緩和し、号機間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
+            "【使い方】" & vbCrLf & _
+            "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
+            "②品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
+            "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
+            "④「AB編成動線最適化」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
+            "【カスタマイズ】" & vbCrLf & _
+            "除外号機・除外ロケーション・除外品コード・号機回数比シート名・入替候補件数・ABブロック・号機別目標構成比などは「設定」シートで変更できます" & _
+            "(シートが無ければ実行時に自動作成されます)。号機別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
+        wsPanel.Range("B4").Font.Size = 11
+        wsPanel.Range("B4").WrapText = True
+        wsPanel.Range("B4").VerticalAlignment = xlTop
+        wsPanel.Rows("4:18").RowHeight = 18
 
-    wsPanel.Range("B4:H18").Merge
-    wsPanel.Range("B4").Value = _
-        "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同一号機・同一ゾーン(対面)で" & _
-        "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案するツールです。" & _
-        "同時ピッキングの集中を緩和し、号機間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
-        "【使い方】" & vbCrLf & _
-        "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
-        "②品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
-        "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
-        "④「AB編成動線最適化」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
-        "【カスタマイズ】" & vbCrLf & _
-        "除外号機・除外ロケーション・除外品コード・号機回数比シート名・入替候補件数・ABブロック・号機別目標構成比などは「設定」シートで変更できます" & _
-        "(シートが無ければ実行時に自動作成されます)。号機別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
-    wsPanel.Range("B4").Font.Size = 11
-    wsPanel.Range("B4").WrapText = True
-    wsPanel.Range("B4").VerticalAlignment = xlTop
-    wsPanel.Rows("4:18").RowHeight = 18
+        Dim btn As Button
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
+        btn.Name = "AB編成動線最適化ボタン"
+        btn.OnAction = "OptimizeABFormationFlow"
+        btn.Characters.Text = "AB編成動線最適化を実行"
+        btn.Font.Size = 12
+        btn.Font.Bold = True
+    End If
 
-    Dim btn As Button
-    Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
-    btn.OnAction = "OptimizeABFormationFlow"
-    btn.Characters.Text = "AB編成動線最適化を実行"
-    btn.Font.Size = 12
-    btn.Font.Bold = True
+    ' ボタンが下に伸び続けないよう、既存のボタンをすべて2列に並び替える
+    ' (Module8・Module9・Module10のEnsure系Subからも毎回呼び出される)
+    Call LayoutPanelButtons
+End Sub
+
+' 「操作パネル」シート上の各種ボタンを、決められた順序で2列に並べ直す
+' (新しいボタンが追加されるたびに1列で下に伸び続けるのを防ぐため、名前が存在するものだけを詰めて配置する)
+Sub LayoutPanelButtons()
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If wsPanel Is Nothing Then Exit Sub
+
+    Const BTN_WIDTH As Double = 220
+    Const BTN_HEIGHT As Double = 36
+    Const GAP_X As Double = 20
+    Const GAP_Y As Double = 16
+    Dim baseLeft As Double: baseLeft = wsPanel.Range("B20").Left
+    Dim baseTop As Double: baseTop = wsPanel.Range("B20").Top
+
+    Dim orderNames As Variant
+    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン")
+
+    Dim idx As Long, placedCount As Long: placedCount = 0
+    For idx = LBound(orderNames) To UBound(orderNames)
+        Dim shp As Shape
+        On Error Resume Next
+        Set shp = wsPanel.Shapes(CStr(orderNames(idx)))
+        On Error GoTo 0
+        If Not shp Is Nothing Then
+            Dim colIdx As Long: colIdx = placedCount Mod 2
+            Dim rowIdx As Long: rowIdx = placedCount \ 2
+            shp.Left = baseLeft + colIdx * (BTN_WIDTH + GAP_X)
+            shp.Top = baseTop + rowIdx * (BTN_HEIGHT + GAP_Y)
+            placedCount = placedCount + 1
+        End If
+        Set shp = Nothing
+    Next idx
 End Sub
 
 ' ----------------------------------------------------

@@ -169,7 +169,7 @@ Sub CreateRelocationPlan()
     ' 入替候補の選定(目標構成比を最も上回っている機番の高頻度ロケーションを、同じ段の中から
     ' 最も目標構成比を下回っている機番の未使用ロケーションと入れ替える、を繰り返す)
     Dim outArr() As Variant
-    ReDim outArr(1 To relocCount, 1 To 12)
+    ReDim outArr(1 To relocCount, 1 To 10)
     Dim outCnt As Long: outCnt = 0
     Dim dictGivenUpMach As Object: Set dictGivenUpMach = CreateObject("Scripting.Dictionary") ' これ以上有効な交換相手が見つからない機番
 
@@ -239,18 +239,16 @@ Sub CreateRelocationPlan()
             rowUsed(partnerRow) = True
 
             outCnt = outCnt + 1
-            outArr(outCnt, 1) = rowDan(srcRow) ' 段(移動元・移動先とも同じ)
-            outArr(outCnt, 2) = srcMachV
-            outArr(outCnt, 3) = rowCol(srcRow)
-            outArr(outCnt, 4) = rowItemCode(srcRow)
-            outArr(outCnt, 5) = rowItemName(srcRow)
-            outArr(outCnt, 6) = rowCnt(srcRow)
-            outArr(outCnt, 7) = dstMachV
-            outArr(outCnt, 8) = rowCol(partnerRow)
-            outArr(outCnt, 9) = rowItemCode(partnerRow)
-            outArr(outCnt, 10) = rowItemName(partnerRow)
-            outArr(outCnt, 11) = rowCnt(partnerRow)
-            outArr(outCnt, 12) = Format(srcRatioBefore, "0.0%") & "→" & Format(srcRatioAfter, "0.0%") & _
+            outArr(outCnt, 1) = rowItemName(srcRow)
+            outArr(outCnt, 2) = rowItemCode(srcRow)
+            outArr(outCnt, 3) = FormatLocationStr(srcMachV, rowDan(srcRow), rowCol(srcRow))
+            outArr(outCnt, 4) = rowCnt(srcRow)
+            outArr(outCnt, 5) = "⇔"
+            outArr(outCnt, 6) = rowItemName(partnerRow)
+            outArr(outCnt, 7) = rowItemCode(partnerRow)
+            outArr(outCnt, 8) = FormatLocationStr(dstMachV, rowDan(partnerRow), rowCol(partnerRow))
+            outArr(outCnt, 9) = rowCnt(partnerRow)
+            outArr(outCnt, 10) = Format(srcRatioBefore, "0.0%") & "→" & Format(srcRatioAfter, "0.0%") & _
                 "  /  " & Format(dstRatioBefore, "0.0%") & "→" & Format(dstRatioAfter, "0.0%")
         End If
     Loop
@@ -277,27 +275,35 @@ Sub CreateRelocationPlan()
     End If
     wsOut.Name = "ロケ変指示"
 
-    wsOut.Columns("D:D").NumberFormat = "@" ' 品コードは先頭ゼロ落ち防止
-    wsOut.Columns("I:I").NumberFormat = "@"
+    ' 品コード・ロケーションは先頭ゼロ落ち・日付誤変換防止のため文字列表示にする(AB編成動線最適化と同じ扱い)
+    wsOut.Columns("B:B").NumberFormat = "@"
+    wsOut.Columns("C:C").NumberFormat = "@"
+    wsOut.Columns("G:G").NumberFormat = "@"
+    wsOut.Columns("H:H").NumberFormat = "@"
 
-    wsOut.Range("A1:L1").Merge
+    wsOut.Range("A1:J1").Merge
     wsOut.Cells(1, 1).Value = "【予測データに基づくロケ変指示(候補" & outCnt & "件/設定" & relocCount & "件・入替相手は同じ段のみ)】"
     wsOut.Cells(1, 1).Font.Bold = True: wsOut.Cells(1, 1).Font.Size = 14
     wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
-    wsOut.Range("A2:L2").Merge
-    wsOut.Cells(2, 1).Value = "「設定」シートの■機番別目標構成比に近づけるよう、目標超過機番の高頻度ロケーションと目標未達機番のロケーションを、同じ段の中で入れ替える指示です。"
+    wsOut.Range("A2:J2").Merge
+    wsOut.Cells(2, 1).Value = "「設定」シートの■機番別目標構成比に近づけるよう、目標超過機番の高頻度ロケーションと目標未達機番のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「機番-段-列」の表記です(AB編成動線最適化と同じ)。"
     wsOut.Cells(2, 1).HorizontalAlignment = xlLeft
 
-    wsOut.Range("A4:L4").Value = Array("段", "移動元機番", "移動元列", "移動元品コード", "移動元品名", "移動元予測回数", "移動先機番", "移動先列", "移動先品コード", "移動先品名", "移動先予測回数", "構成比(移動元/移動先:変更前→変更後)")
-    wsOut.Range("A5").Resize(outCnt, 12).Value = outArr
+    wsOut.Range("A4:J4").Value = Array("【移動元品】(交換品コード)", "移動元品コード", "移動元ロケーション", "移動元予測回数", "交換方向", "【移動先品】(交換対象品)", "移動先品コード", "移動先ロケーション", "移動先予測回数", "構成比(移動元/移動先:変更前→変更後)")
+    wsOut.Range("A5").Resize(outCnt, 10).Value = outArr
 
-    wsOut.Range("A4:L4").Interior.Color = RGB(220, 230, 255)
-    wsOut.Range("A4:L4").Font.Bold = True
-    wsOut.Columns("A:L").AutoFit
+    wsOut.Range("A4:J4").Interior.Color = RGB(220, 230, 255)
+    wsOut.Range("A4:J4").Font.Bold = True
+    wsOut.Columns("A:J").AutoFit
 
     MsgBox "「ロケ変指示」シートを作成しました。(" & outCnt & "件)", vbInformation
 End Sub
+
+' AB編成動線最適化と同じ「機番-段-列」形式でロケーションを表記する(例:46-02-05)
+Private Function FormatLocationStr(ByVal mach As Long, ByVal dan As Long, ByVal col As Long) As String
+    FormatLocationStr = mach & "-" & Format(dan, "00") & "-" & Format(col, "00")
+End Function
 
 Private Function GetMachRatio(ByVal mach As Long, actualCountByMach As Object, ByVal targetedHitTotal As Double) As Double
     Dim c As Double: c = 0
@@ -385,20 +391,16 @@ Sub EnsureRelocationPlanButton()
     On Error Resume Next
     Set existing = wsPanel.Shapes("ロケ変指示ボタン")
     On Error GoTo 0
-    If Not existing Is Nothing Then Exit Sub
+    If existing Is Nothing Then
+        Dim btn As Button
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
+        btn.Name = "ロケ変指示ボタン"
+        btn.OnAction = "CreateRelocationPlan"
+        btn.Characters.Text = "ロケ変指示を作成"
+        btn.Font.Size = 12
+        btn.Font.Bold = True
+    End If
 
-    Dim maxBottom As Double: maxBottom = 0
-    Dim shp As Shape
-    For Each shp In wsPanel.Shapes
-        If shp.Top + shp.Height > maxBottom Then maxBottom = shp.Top + shp.Height
-    Next shp
-    If maxBottom = 0 Then maxBottom = wsPanel.Range("B20").Top
-
-    Dim btn As Button
-    Set btn = wsPanel.Buttons.Add(wsPanel.Range("B2").Left, maxBottom + 16, 220, 36)
-    btn.Name = "ロケ変指示ボタン"
-    btn.OnAction = "CreateRelocationPlan"
-    btn.Characters.Text = "ロケ変指示を作成"
-    btn.Font.Size = 12
-    btn.Font.Bold = True
+    ' ボタンが下に伸び続けないよう、2列に並び替える(Module3の共通処理)
+    Call LayoutPanelButtons
 End Sub
