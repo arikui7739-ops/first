@@ -1317,14 +1317,16 @@ Sub EnsureOperationPanelSheet()
         wsPanel.Name = "操作パネル"
 
         wsPanel.Columns("A:A").ColumnWidth = 3
-        wsPanel.Columns("B:H").ColumnWidth = 14
+        wsPanel.Columns("B:F").ColumnWidth = 14 ' 説明文エリア
+        wsPanel.Columns("G:G").ColumnWidth = 3  ' 区切り
+        wsPanel.Columns("H:K").ColumnWidth = 14 ' ボタン配置エリア(説明文の右側)
 
-        wsPanel.Range("B2:H2").Merge
+        wsPanel.Range("B2:K2").Merge
         wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
         wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
         wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
-        wsPanel.Range("B4:H40").Merge
+        wsPanel.Range("B4:F55").Merge
         wsPanel.Range("B4").Value = _
             "このワークブックには、AB(自動倉庫ラック)編成の動線最適化に関する4つのマクロが入っています。" & _
             "①AB編成動線最適化(Module3):ピッキング実績ログを解析し、同一号機・同一ゾーン(対面)で同時に出庫されやすい" & _
@@ -1353,10 +1355,10 @@ Sub EnsureOperationPanelSheet()
         wsPanel.Range("B4").Font.Size = 11
         wsPanel.Range("B4").WrapText = True
         wsPanel.Range("B4").VerticalAlignment = xlTop
-        wsPanel.Rows("4:40").RowHeight = 18
+        wsPanel.Rows("4:55").RowHeight = 18
 
         Dim btn As Button
-        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B42").Left, wsPanel.Range("B42").Top, 220, 36)
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("H4").Left, wsPanel.Range("H4").Top, 220, 36)
         btn.Name = "AB編成動線最適化ボタン"
         btn.OnAction = "OptimizeABFormationFlow"
         btn.Characters.Text = "AB編成動線最適化を実行"
@@ -1382,8 +1384,8 @@ Sub LayoutPanelButtons()
     Const BTN_HEIGHT As Double = 36
     Const GAP_X As Double = 20
     Const GAP_Y As Double = 16
-    Dim baseLeft As Double: baseLeft = wsPanel.Range("B42").Left
-    Dim baseTop As Double: baseTop = wsPanel.Range("B42").Top
+    Dim baseLeft As Double: baseLeft = wsPanel.Range("H4").Left
+    Dim baseTop As Double: baseTop = wsPanel.Range("H4").Top
 
     Dim orderNames As Variant
     orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン")
