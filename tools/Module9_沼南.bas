@@ -8,9 +8,10 @@ Option Explicit
 ' レイアウトは「設定」シートの「■号機別目標構成比」と同じ考え方で、ABブロック内の号機は機番ペア(ゾーン)ごとに
 ' 奇数号機を上向き・偶数号機を下向きに表示し(ABブロックの境界はGetMachPairLabelで判定するため、
 ' 沼南の非連続なブロック配置(1～30、37～50)にも正しく対応する)、Cバラ(C01・C02)・拡張(X)は
-' 上向きの単独項目として追加する。「設定」シートに目標構成比が入力されていれば、実績/予測の比率と
-' 並べて目標比率も折れ線で比較できるようにする。既存の同名シートは削除してから作り直すため、
-' 再実行すると内容が更新される
+' 上向きの単独項目として、必ずC01・C02・Xの順で追加する(実績側は号機の範囲で判定:ABブロック外かつ
+' 61～73はC01、81～93はC02、それ以外はXという沼南の実際のラック配置に基づく固定ルール)。
+' 「設定」シートに目標構成比が入力されていれば、実績/予測の比率と並べて目標比率も折れ線で比較できるようにする。
+' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
 ' ----------------------------------------------------
 
 Sub CreateForecastRatioChart()
@@ -69,38 +70,6 @@ Sub CreateActualRatioChart()
     Dim abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long
     Call LoadSettingsForChart(dictTargetByLabel, abBlockFrom, abBlockTo, abBlockCount)
 
-    ' 号機→ゾーンラベルの対応づけは「予測データ」シート(ゾーン列・号機列を持つ)があればそこから作る。
-    ' 無ければABブロック内の号機(号機=ゾーン番号)のみ集計し、Cバラ・拡張(号機だけでは判別できない)は対象外にする
-    Dim dictMachToZone As Object: Set dictMachToZone = CreateObject("Scripting.Dictionary")
-    Dim hasZoneMap As Boolean: hasZoneMap = False
-    Dim wsData As Worksheet
-    On Error Resume Next
-    Set wsData = ThisWorkbook.Sheets("予測データ")
-    On Error GoTo 0
-    If Not wsData Is Nothing Then
-        Const HEADER_ROW2 As Long = 3
-        Dim lastRow2 As Long: lastRow2 = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).Row
-        Dim lastCol2 As Long: lastCol2 = wsData.Cells(HEADER_ROW2, wsData.Columns.Count).End(xlToLeft).Column
-        Dim machColIdx2 As Long: machColIdx2 = -1
-        Dim zoneColIdx2 As Long: zoneColIdx2 = -1
-        Dim hc2 As Long
-        For hc2 = 1 To lastCol2
-            Dim hName2 As String: hName2 = Trim(CStr(wsData.Cells(HEADER_ROW2, hc2).Value))
-            If hName2 = "号機" Then machColIdx2 = hc2
-            If hName2 = "ゾーン" Then zoneColIdx2 = hc2
-        Next hc2
-        If machColIdx2 > 0 And zoneColIdx2 > 0 Then
-            Dim r2 As Long
-            For r2 = HEADER_ROW2 + 1 To lastRow2
-                Dim machKey As String: machKey = Trim(CStr(wsData.Cells(r2, machColIdx2).Value))
-                If machKey <> "" And Not dictMachToZone.Exists(machKey) Then
-                    dictMachToZone(machKey) = Trim(CStr(wsData.Cells(r2, zoneColIdx2).Value))
-                End If
-            Next r2
-            hasZoneMap = (dictMachToZone.Count > 0)
-        End If
-    End If
-
     ' ファイル選択(複数選択・全ファイル形式。Module3と同じくS71実績ファイルを想定)
     Dim fd As Office.FileDialog
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -117,7 +86,9 @@ Sub CreateActualRatioChart()
     Application.EnableEvents = False
     Application.DisplayAlerts = False
 
-    ' E行(号機2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)
+    ' E行(号機2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)。
+    ' ABブロック内はGetMachPairLabel等と同じくIsInABBlockで判定し、ブロック外は沼南の実際のラック配置
+    ' (Cバラ01=61～73、Cバラ02=81～93、それ以外は拡張X)を号機の範囲で直接判定する
     Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
     Dim fIdx As Long, filePath As String, fileNo As Integer, textLine As String
     For fIdx = 1 To fd.SelectedItems.Count
@@ -132,14 +103,17 @@ Sub CreateActualRatioChart()
                     Dim rec As String: rec = Mid(textLine, slotStart, 9)
                     If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
                         Dim mach As Long: mach = Val(Mid(rec, 1, 2))
-                        Dim machKeyStr As String: machKeyStr = Format(mach, "00")
-                        Dim zoneLbl As String: zoneLbl = ""
-                        If hasZoneMap And dictMachToZone.Exists(machKeyStr) Then
-                            zoneLbl = dictMachToZone(machKeyStr)
-                        ElseIf IsInABBlock(CInt(mach), abBlockFrom, abBlockTo, abBlockCount) Then
-                            zoneLbl = "AB" & Format(mach, "00")
-                        End If
-                        If zoneLbl <> "" Then
+                        If mach >= 1 Then
+                            Dim zoneLbl As String
+                            If IsInABBlock(CInt(mach), abBlockFrom, abBlockTo, abBlockCount) Then
+                                zoneLbl = "AB" & Format(mach, "00")
+                            ElseIf mach >= 61 And mach <= 73 Then
+                                zoneLbl = "C01"
+                            ElseIf mach >= 81 And mach <= 93 Then
+                                zoneLbl = "C02"
+                            Else
+                                zoneLbl = "X"
+                            End If
                             dictActualByLabel(zoneLbl) = dictActualByLabel(zoneLbl) + 1
                         End If
                     End If
@@ -155,9 +129,7 @@ Sub CreateActualRatioChart()
     Application.EnableEvents = True
     Application.ScreenUpdating = True
 
-    Dim noteMsg As String
-    If Not hasZoneMap Then noteMsg = vbCrLf & "※「予測データ」シートが無いため、Cバラ(C01/C02)・拡張(X)は集計されていません(ABブロック内の号機のみ)。"
-    MsgBox "「実績構成比グラフ」を作成しました。(" & fd.SelectedItems.Count & "ファイル読込)" & noteMsg, vbInformation
+    MsgBox "「実績構成比グラフ」を作成しました。(" & fd.SelectedItems.Count & "ファイル読込)", vbInformation
 End Sub
 
 ' 「設定」シートからABブロック構成と「■号機別目標構成比」(Q:R列)をラベル文字列をキーにしたまま読み込む
@@ -271,24 +243,14 @@ Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As 
         End If
     Next z
 
-    ' AB以外のラベル(Cバラ・拡張等)を、実績データまたは目標構成比のどちらかに存在するものすべて集めて、
-    ' 奇数側の列に単独の上向き項目として追加する(奇数/偶数のペア概念が無いため偶数側は使わない)
-    Dim dictExtraLabels As Object: Set dictExtraLabels = CreateObject("Scripting.Dictionary")
-    For Each k In dictTargetByLabel.Keys
-        If Not (CStr(k) Like "AB##") Then
-            If Not dictExtraLabels.Exists(CStr(k)) Then dictExtraLabels.Add CStr(k), True
-        End If
-    Next k
-    For Each k In dictActualByLabel.Keys
-        If Not (CStr(k) Like "AB##") Then
-            If Not dictExtraLabels.Exists(CStr(k)) Then dictExtraLabels.Add CStr(k), True
-        End If
-    Next k
-
-    Dim ek As Variant
-    For Each ek In dictExtraLabels.Keys
+    ' AB以外のラベル(Cバラ01・Cバラ02・拡張X)を、必ずこの順番で奇数側の列に単独の上向き項目として追加する
+    ' (奇数/偶数のペア概念が無いため偶数側は使わない。沼南の実際のラック配置に合わせた固定順)
+    Dim extraLabels As Variant: extraLabels = Array("C01", "C02", "X")
+    Dim ei As Long
+    For ei = LBound(extraLabels) To UBound(extraLabels)
+        Dim ek As String: ek = CStr(extraLabels(ei))
         r = r + 1
-        wsOut.Cells(r, 1).Value = CStr(ek)
+        wsOut.Cells(r, 1).Value = ek
         Dim extraVal As Double: extraVal = 0
         If dictActualByLabel.Exists(ek) Then extraVal = dictActualByLabel(ek)
         wsOut.Cells(r, 2).Value = IIf(grandTotal > 0, extraVal / grandTotal, 0)
@@ -297,7 +259,7 @@ Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As 
             wsOut.Cells(r, 4).Value = dictTargetByLabel(ek)
             wsOut.Cells(r, 4).NumberFormat = "0.0%"
         End If
-    Next ek
+    Next ei
 
     Dim lastDataRow As Long: lastDataRow = r
     wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastDataRow, 5)).Columns.AutoFit
