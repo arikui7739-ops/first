@@ -146,31 +146,35 @@ Sub CreateActualRatioChart()
                     If bDate > businessDate Then businessDate = bDate
                 End If
             ElseIf Left(textLine, 1) = "E" And Len(textLine) >= 10 Then
-                ' E行は1行=1ロケーション(先頭の9文字が機番2桁+段2桁+列2桁+3桁)。
-                ' 末尾の余白がたまたま数字のみになる行があり、複数スロットがあるものとして
-                ' 13文字おきに読むと余白を2件目のレコードとして誤カウントしてしまうため、
-                ' 1行につき先頭の9文字だけを読む
-                Dim rec As String: rec = Mid(textLine, 2, 9)
-                If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
-                    Dim mach As Long: mach = Val(Mid(rec, 1, 2))
-                    Dim dan As Long: dan = Val(Mid(rec, 3, 2))
-                    Dim retsu As Long: retsu = Val(Mid(rec, 5, 2))
-                    Dim machKeyStr As String: machKeyStr = Format(mach, "00")
-                    Dim zoneLbl As String: zoneLbl = ""
-                    If hasZoneMap And dictMachToZone.Exists(machKeyStr) Then
-                        zoneLbl = dictMachToZone(machKeyStr)
-                    ElseIf mach >= 1 And mach <= MAX_AB_MACH Then
-                        zoneLbl = "AB" & Format(mach, "00")
-                    End If
-                    If zoneLbl <> "" Then
-                        dictActualByLabel(zoneLbl) = dictActualByLabel(zoneLbl) + 1
-                    End If
+                ' E行は13文字おきに最大3件のレコード(先頭9文字=機番2桁+段2桁+列2桁+3桁)が
+                ' 詰められていることがある。末尾の余白がスペース埋め(新形式)またはゼロ埋め
+                ' (旧形式)のいずれかで、ゼロ埋めの場合は余白がたまたま数字のみになり、
+                ' 「機番0・段0・列0」という実在しないレコードが混じることがあるため、
+                ' 機番0のレコードは明示的に除外する(下のmach>=1判定)
+                Dim slotStart As Long, rec As String
+                For slotStart = 2 To Len(textLine) - 8 Step 13
+                    rec = Mid(textLine, slotStart, 9)
+                    If Trim(rec) <> "" And Len(Trim(rec)) = 9 And IsNumeric(rec) Then
+                        Dim mach As Long: mach = Val(Mid(rec, 1, 2))
+                        Dim dan As Long: dan = Val(Mid(rec, 3, 2))
+                        Dim retsu As Long: retsu = Val(Mid(rec, 5, 2))
+                        Dim machKeyStr As String: machKeyStr = Format(mach, "00")
+                        Dim zoneLbl As String: zoneLbl = ""
+                        If hasZoneMap And dictMachToZone.Exists(machKeyStr) Then
+                            zoneLbl = dictMachToZone(machKeyStr)
+                        ElseIf mach >= 1 And mach <= MAX_AB_MACH Then
+                            zoneLbl = "AB" & Format(mach, "00")
+                        End If
+                        If zoneLbl <> "" Then
+                            dictActualByLabel(zoneLbl) = dictActualByLabel(zoneLbl) + 1
+                        End If
 
-                    If mach >= 1 Then
-                        Dim locHitKey As String: locHitKey = machKeyStr & Format(dan, "00") & Format(retsu, "00")
-                        dictLocationHits(locHitKey) = dictLocationHits(locHitKey) + 1
+                        If mach >= 1 Then
+                            Dim locHitKey As String: locHitKey = machKeyStr & Format(dan, "00") & Format(retsu, "00")
+                            dictLocationHits(locHitKey) = dictLocationHits(locHitKey) + 1
+                        End If
                     End If
-                End If
+                Next slotStart
             End If
         Loop
         Close #fileNo
