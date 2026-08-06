@@ -285,14 +285,18 @@ Sub OptimizeABFormationFlow()
 
     ' 目標構成比は「設定」シートの合計が100%になっていなくても機番どうしの相対バランスとして扱えるよう、
     ' 目標比率の合計(targetRatioSum)と、目標が設定されている機番だけの実績ヒット合計(targetedHitStart)で
-    ' それぞれ正規化してから比較する(Cバラ等AB以外への出荷分による絶対値のズレの影響を受けないようにする)
+    ' それぞれ正規化してから比較する(Cバラ等AB以外への出荷分による絶対値のズレの影響を受けないようにする)。
+    ' 「機番別目標構成比」にはC01・C02・Xのような機番以外のカテゴリ行(構成比グラフ用)が混在することがあるため、
+    ' 数値の機番キーだけをスワップ判定の対象にする(数値以外のキーはCLngでエラーになるため必ず判定してから使う)
     Dim targetRatioSum As Double: targetRatioSum = 0
     Dim targetedHitStart As Double: targetedHitStart = 0
     Dim trKey As Variant
     For Each trKey In dictTargetRatio.Keys
-        targetRatioSum = targetRatioSum + dictTargetRatio(trKey)
-        Dim trMach As Long: trMach = CLng(trKey)
-        If trMach >= 1 And trMach <= maxMachNum Then targetedHitStart = targetedHitStart + machHitStart(trMach)
+        If IsNumeric(trKey) Then
+            targetRatioSum = targetRatioSum + dictTargetRatio(trKey)
+            Dim trMach As Long: trMach = CLng(trKey)
+            If trMach >= 1 And trMach <= maxMachNum Then targetedHitStart = targetedHitStart + machHitStart(trMach)
+        End If
     Next trKey
     Dim hasTargetRatioData As Boolean: hasTargetRatioData = (dictTargetRatio.Count > 0 And targetRatioSum > 0 And targetedHitStart > 0)
 
@@ -1395,7 +1399,17 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("N3").Font.Bold = True
     wsSet.Range("N4").Value = "機番": wsSet.Range("O4").Value = "目標構成比(%)"
     wsSet.Range("N4:O4").Font.Bold = True
-    ' 例:1号機を1.8%、20号機を2.1%にしたい場合はN5=1・O5=1.8、N6=20・O6=2.1のように行を追加する(未入力なら奇数偶数バランス優先のまま)
+    ' 「AB01」のような機番ラベル、素の数値、C01・C02・Xのような機番以外のカテゴリラベル(構成比グラフ用)のいずれも入力できる。
+    ' 既定値は実際の目標構成比(AB01～AB46・C01・C02・X)を初期値として入れておく(合計100%)
+    Dim defaultTargetLabels As Variant
+    Dim defaultTargetValues As Variant
+    defaultTargetLabels = Array("AB01", "AB02", "AB03", "AB04", "AB05", "AB06", "AB07", "AB08", "AB09", "AB10", "AB11", "AB12", "AB13", "AB14", "AB15", "AB16", "AB17", "AB18", "AB19", "AB20", "AB21", "AB22", "AB23", "AB24", "AB25", "AB26", "AB27", "AB28", "AB29", "AB30", "AB31", "AB32", "AB33", "AB34", "AB35", "AB36", "AB37", "AB38", "AB39", "AB40", "AB41", "AB42", "AB43", "AB44", "AB45", "AB46", "C01", "C02", "X")
+    defaultTargetValues = Array(1.8, 1.8, 1.8, 1.8, 1.9, 1.9, 1.9, 1.9, 2#, 2#, 2#, 2#, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2.1, 2#, 2#, 2#, 2#, 2#, 2#, 1.9, 1.9, 1.8, 1.8, 1.8, 1.8, 3.5, 3.5, 1#)
+    Dim dti As Long
+    For dti = 0 To UBound(defaultTargetLabels)
+        wsSet.Cells(5 + dti, 14).Value = defaultTargetLabels(dti)
+        wsSet.Cells(5 + dti, 15).Value = defaultTargetValues(dti)
+    Next dti
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
@@ -1479,12 +1493,23 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
     Next rI
 
     ' 機番別目標構成比(N:O列=機番/目標構成比%、5行目以降)。未入力ならdictTargetRatioは空のまま
-    ' (呼び出し側で「未入力なら奇数偶数バランス優先」のフォールバックに使う)
+    ' (呼び出し側で「未入力なら奇数偶数バランス優先」のフォールバックに使う)。
+    ' N列は「AB01」のような機番ラベル、素の数値(1など)、またはC01・C02・Xのような
+    ' 機番以外のカテゴリラベル(構成比グラフでのみ使う。スワップ判定では無視される)のいずれでもよい
     Dim lastN As Long: lastN = wsSet.Cells(wsSet.Rows.Count, "N").End(xlUp).Row
     Dim rN As Long
     For rN = 5 To lastN
-        If IsNumeric(wsSet.Cells(rN, 14).Value) And IsNumeric(wsSet.Cells(rN, 15).Value) Then
-            dictTargetRatio(CStr(CLng(wsSet.Cells(rN, 14).Value))) = CDbl(wsSet.Cells(rN, 15).Value) / 100
+        Dim trLabel As String: trLabel = Trim(CStr(wsSet.Cells(rN, 14).Value))
+        If trLabel <> "" And IsNumeric(wsSet.Cells(rN, 15).Value) Then
+            Dim trKeyStr As String
+            If trLabel Like "AB##" Then
+                trKeyStr = CStr(CInt(Mid(trLabel, 3, 2))) ' 「AB01」→「1」
+            ElseIf IsNumeric(trLabel) Then
+                trKeyStr = CStr(CLng(trLabel)) ' 素の数値がそのまま入っている場合(従来形式)
+            Else
+                trKeyStr = trLabel ' C01・C02・Xなど機番以外のカテゴリはラベルのままキーにする
+            End If
+            dictTargetRatio(trKeyStr) = CDbl(wsSet.Cells(rN, 15).Value) / 100
         End If
     Next rN
 End Sub
