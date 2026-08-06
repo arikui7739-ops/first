@@ -128,6 +128,7 @@ Sub CreateActualRatioChart()
     Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
     Dim dictLocationHits As Object: Set dictLocationHits = CreateObject("Scripting.Dictionary")
     Dim businessDate As Date: businessDate = DateSerial(1900, 1, 1)
+    Dim skipMode As Boolean: skipMode = False
     Dim fIdx As Long, filePath As String, fileNo As Integer, textLine As String
     For fIdx = 1 To fd.SelectedItems.Count
         filePath = fd.SelectedItems(fIdx)
@@ -145,7 +146,10 @@ Sub CreateActualRatioChart()
                     On Error GoTo 0
                     If bDate > businessDate Then businessDate = bDate
                 End If
-            ElseIf Left(textLine, 1) = "E" And Len(textLine) >= 10 Then
+            ElseIf Left(textLine, 1) = "H" Then
+                ' H99999は在庫サマリー行。以降のE行(在庫全体の棚卸)は出荷実績としてカウントしない
+                skipMode = (Mid(textLine, 2, 5) = "99999")
+            ElseIf Left(textLine, 1) = "E" And Len(textLine) >= 10 And Not skipMode Then
                 ' E行は13文字おきに最大3件のレコード(先頭9文字=機番2桁+段2桁+列2桁+3桁)が
                 ' 詰められていることがある。末尾の余白がスペース埋め(新形式)またはゼロ埋め
                 ' (旧形式)のいずれかで、ゼロ埋めの場合は余白がたまたま数字のみになり、
