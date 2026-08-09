@@ -1336,7 +1336,8 @@ Sub EnsureOperationPanelSheet()
     wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
     wsPanel.Range("B4:F55").Merge
-    wsPanel.Range("B4").Value = _
+    Dim panelDesc As String
+    panelDesc = _
         "このワークブックには、AB(自動倉庫ラック)編成の動線最適化に関する5つのマクロが入っています。" & _
         "①AB編成動線最適化(Module3):ピッキング実績ログを解析し、同一機番・同一ゾーン(対面)で同時に出庫されやすい" & _
         "商品同士を検出して、別ゾーンへ分散配置し直す入替候補を提案します。" & _
@@ -1347,7 +1348,8 @@ Sub EnsureOperationPanelSheet()
         "作成します(同じ段の中でのみ入替えます)。" & _
         "⑤同時ピッキング改善指示(Module1):51～58号機・61～68号機のエリアで、離れた号機同士が同時ピッキングされて" & _
         "いる商品を検出し、起点品の近くにある非稼働品と入れ替える指示を作成します(AB編成動線最適化とは対象号機の" & _
-        "範囲が異なる別エリア向けです)。" & vbCrLf & vbCrLf & _
+        "範囲が異なる別エリア向けです)。" & vbCrLf & vbCrLf
+    panelDesc = panelDesc & _
         "【空のワークブックで初めて使うとき】" & vbCrLf & _
         "①VBEでこの5つのモジュール(Module1_石狩・Module3_石狩・Module8_石狩・Module9_石狩・Module10_石狩、または" & _
         "Module1・Module3～10)を「ファイルのインポート」で追加する" & vbCrLf & _
@@ -1358,13 +1360,15 @@ Sub EnsureOperationPanelSheet()
         "【使う順番の目安】" & vbCrLf & _
         "①「予測データを取り込む」でCSVを取り込む(②の一部・③④の前提)" & vbCrLf & _
         "②「AB編成動線最適化を実行」でピッキング実績ファイル(S71)を解析(品名マスタ・ロケーションマスタは任意)" & vbCrLf & _
-        "③「予測構成比グラフを作成」「実績構成比グラフを作成」でグラフを作成(実績側はS71ファイルが必要)" & vbCrLf & _
+        "③「予測構成比グラフを作成」「実績構成比グラフを作成」でグラフを作成(実績側はS71ファイルが必要)" & vbCrLf
+    panelDesc = panelDesc & _
         "④「ロケ変指示を作成」でロケ変指示を作成(予測データの取込と、「設定」シートの■機番別目標構成比の入力が必要)" & vbCrLf & _
         "⑤「同時ピッキング改善指示を作成」でピッキング実績ファイル(S71)を解析(品名マスタは任意)" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
         "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・ロケ変候補件数・最大機番・" & _
         "AB間口数・機番別目標構成比などは「設定」シートで変更できます(シートが無ければ実行時に自動作成されます)。" & _
         "機番別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
+    wsPanel.Range("B4").Value = panelDesc
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
     wsPanel.Range("B4").VerticalAlignment = xlTop
