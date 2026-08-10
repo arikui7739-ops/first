@@ -1394,6 +1394,26 @@ End Sub
 ' D列(4列目)=商品コード、103列目=大分類コード、68～71列目=参考の縦/横/高/重量、
 ' 84～87列目=実測の縦/横/高/重量(実測が無ければ参考を使う)
 Sub LoadItemAttributeMasterIfSelected(dictItemCategory As Object, dictItemWeightMaster As Object, dictItemVolumeMaster As Object)
+    ' 「設定」シートのチェックボックス(L13)がオフなら、ファイル選択ダイアログ自体を出さずに終える
+    Dim wsSetChk As Worksheet
+    On Error Resume Next
+    Set wsSetChk = ThisWorkbook.Sheets("設定")
+    On Error GoTo 0
+    If Not wsSetChk Is Nothing Then
+        If wsSetChk.Range("L13").Value = False Then Exit Sub
+    End If
+
+    ' 「カテゴリー粒度」(L12)に応じて、WF021L1形式CSVの何列目をカテゴリーコードとして使うかを決める
+    ' (103列目=大分類、104列目=中分類、105列目=小分類。0始まりの配列添字ではそれぞれ102/103/104)
+    Dim catColIdx4 As Long: catColIdx4 = 102
+    If Not wsSetChk Is Nothing Then
+        Select Case Trim(CStr(wsSetChk.Range("L12").Value))
+            Case "中分類": catColIdx4 = 103
+            Case "小分類": catColIdx4 = 104
+            Case Else: catColIdx4 = 102
+        End Select
+    End If
+
     Dim fd4 As Office.FileDialog
     Set fd4 = Application.FileDialog(msoFileDialogFilePicker)
     With fd4
@@ -1411,12 +1431,12 @@ Sub LoadItemAttributeMasterIfSelected(dictItemCategory As Object, dictItemWeight
     Do While Not EOF(fileNo4)
         Line Input #fileNo4, textLine4
         Dim cols4() As String: cols4 = Split(textLine4, ",")
-        If UBound(cols4) >= 102 Then
+        If UBound(cols4) >= 104 Then ' カテゴリー粒度が小分類(105列目)でも安全に読めるよう104以上を要求する
             Dim rawCode4 As String: rawCode4 = Trim(cols4(3)) ' 4列目:商品コード
             If rawCode4 <> "" And IsNumeric(rawCode4) Then
                 Dim codeKey4 As String: codeKey4 = CStr(CLng(rawCode4))
 
-                Dim catCode4 As String: catCode4 = Trim(cols4(102)) ' 103列目:大分類コード
+                Dim catCode4 As String: catCode4 = Trim(cols4(catColIdx4)) ' 「カテゴリー粒度」設定に応じた列(既定は103列目:大分類コード)
                 If catCode4 <> "" And Not dictItemCategory.Exists(codeKey4) Then dictItemCategory.Add codeKey4, catCode4
 
                 ' 重量:実測(87列目)を優先、無ければ参考(71列目)を使う
@@ -1761,6 +1781,22 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K11").Value = "重量重み"
     wsSet.Range("K11").Font.Bold = True
     wsSet.Range("L11").Value = 0.01 ' 重量差1桁(対数比)あたりの減点係数
+
+    wsSet.Range("K12").Value = "カテゴリー粒度"
+    wsSet.Range("K12").Font.Bold = True
+    wsSet.Range("L12").Value = "大分類" ' 商品属性マスタのカテゴリー一致判定に使う粒度(大分類/中分類/小分類)
+    With wsSet.Range("L12").Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="大分類,中分類,小分類"
+    End With
+
+    wsSet.Range("K13").Value = "商品属性マスタ"
+    wsSet.Range("K13").Font.Bold = True
+    Dim chkAttr As CheckBox
+    Set chkAttr = wsSet.CheckBoxes.Add(wsSet.Range("L13").Left, wsSet.Range("L13").Top - 2, 190, 18)
+    chkAttr.Caption = "考慮する(入替候補選定に反映)"
+    chkAttr.LinkedCell = "$L$13"
+    chkAttr.Value = xlOn ' オフにすると、商品属性マスタのファイル選択ダイアログ自体を出さずスキップする
 
     wsSet.Range("N3").Value = "■機番別目標構成比"
     wsSet.Range("N3").Font.Bold = True

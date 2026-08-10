@@ -32,7 +32,17 @@ Sub CreateRelocationPlan()
     Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary")
     Dim ratioSheetName As String, maxSwapRows As Long, maxMachNum As Long, abSlotCount As Long
     Dim dictTargetRatio As Object: Set dictTargetRatio = CreateObject("Scripting.Dictionary")
-    Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount, dictTargetRatio)
+    Dim catWeight As Double: catWeight = 0.005
+    Dim sizeWeight As Double: sizeWeight = 0.01
+    Dim weightWeightCoef As Double: weightWeightCoef = 0.01
+    Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount, dictTargetRatio, catWeight, sizeWeight, weightWeightCoef)
+
+    ' 商品属性マスタ(任意、Module3と共通)。読み込めば、入替候補選定で入替先号機の同カテゴリー品集中度・
+    ' サイズ差・重量差をソフトなペナルティとして反映する(未読込なら従来どおりの選定結果になる)
+    Dim dictItemCategory As Object: Set dictItemCategory = CreateObject("Scripting.Dictionary")
+    Dim dictItemWeightMaster As Object: Set dictItemWeightMaster = CreateObject("Scripting.Dictionary")
+    Dim dictItemVolumeMaster As Object: Set dictItemVolumeMaster = CreateObject("Scripting.Dictionary")
+    Call LoadItemAttributeMasterIfSelected(dictItemCategory, dictItemWeightMaster, dictItemVolumeMaster)
 
     Dim relocCount As Long: relocCount = GetRelocationCandidateCount()
 
@@ -90,6 +100,11 @@ Sub CreateRelocationPlan()
     Dim actualCountByMach As Object: Set actualCountByMach = CreateObject("Scripting.Dictionary")
     Dim dictByDan As Object: Set dictByDan = CreateObject("Scripting.Dictionary") ' 段→その段のロケーション行(添字)のCollection
     Dim dictByMach As Object: Set dictByMach = CreateObject("Scripting.Dictionary") ' 機番→その機番のロケーション行(添字)のCollection
+    Dim dictRowMach As Object: Set dictRowMach = CreateObject("Scripting.Dictionary") ' 行番号(文字列)→機番(商品属性ペナルティ計算用)
+    Dim dictRowCat As Object: Set dictRowCat = CreateObject("Scripting.Dictionary") ' 行番号→大分類コード等(商品属性マスタ)
+    Dim dictRowWt As Object: Set dictRowWt = CreateObject("Scripting.Dictionary") ' 行番号→重量(kg)
+    Dim dictRowVol As Object: Set dictRowVol = CreateObject("Scripting.Dictionary") ' 行番号→体積
+    Dim dictMachCatCount As Object: Set dictMachCatCount = CreateObject("Scripting.Dictionary") ' "機番|大分類コード"→その機番内の同カテゴリー品数
 
     Dim r As Long
     For r = HEADER_ROW + 1 To lastRow
@@ -122,6 +137,16 @@ Sub CreateRelocationPlan()
                             rowCnt(rowN) = forecastCnt
                             rowUsed(rowN) = False
 
+                            ' 商品属性マスタが読み込まれていれば、行番号をキーにカテゴリー・重量・体積を引けるようにする
+                            Dim rowKey As String: rowKey = CStr(rowN)
+                            dictRowMach(rowKey) = mach
+                            If itemCodeStr <> "" And IsNumeric(itemCodeStr) Then
+                                Dim rowCodeKey As String: rowCodeKey = CStr(CLng(itemCodeStr))
+                                If dictItemCategory.Exists(rowCodeKey) Then dictRowCat(rowKey) = dictItemCategory(rowCodeKey)
+                                If dictItemWeightMaster.Exists(rowCodeKey) Then dictRowWt(rowKey) = dictItemWeightMaster(rowCodeKey)
+                                If dictItemVolumeMaster.Exists(rowCodeKey) Then dictRowVol(rowKey) = dictItemVolumeMaster(rowCodeKey)
+                            End If
+
                             Dim machKey As String: machKey = CStr(mach)
                             If actualCountByMach.Exists(machKey) Then
                                 actualCountByMach(machKey) = actualCountByMach(machKey) + forecastCnt
@@ -146,6 +171,16 @@ Sub CreateRelocationPlan()
         MsgBox "「予測データ」シートに、除外条件を除いた対象ロケーションが見つかりませんでした。", vbExclamation
         Exit Sub
     End If
+
+    ' 号機ごとのカテゴリー在庫点数を集計(入替先候補の号機に同カテゴリー品がどれだけ集中しているかの目安に使う)
+    Dim rcI As Long
+    For rcI = 1 To rowN
+        Dim rcKey As String: rcKey = CStr(rcI)
+        If dictRowCat.Exists(rcKey) Then
+            Dim rcTallyKey As String: rcTallyKey = CStr(rowMach(rcI)) & "|" & dictRowCat(rcKey)
+            dictMachCatCount(rcTallyKey) = dictMachCatCount(rcTallyKey) + 1
+        End If
+    Next rcI
 
     ' 目標構成比が入力されている機番だけを対象に、合計が100%でなくても相対バランスとして比較できるよう正規化する
     ' (機番別目標構成比の合計と、目標が設定されている機番だけの実績(予測)合計、それぞれで正規化してから比較する)
@@ -211,7 +246,7 @@ Sub CreateRelocationPlan()
         Dim srcRow As Long: srcRow = FindBestSourceRow(dictByMach(bestOverMach), rowUsed, rowCnt)
         Dim partnerRow As Long: partnerRow = 0
         Do While srcRow > 0 And partnerRow = 0
-            partnerRow = FindBestPartnerRow(dictByDan(CStr(rowDan(srcRow))), rowUsed, rowMach, CLng(bestOverMach), actualCountByMach, dictTargetRatio, targetRatioSum, targetedHitTotal, maxMachNum)
+            partnerRow = FindBestPartnerRow(dictByDan(CStr(rowDan(srcRow))), rowUsed, rowMach, CLng(bestOverMach), actualCountByMach, dictTargetRatio, targetRatioSum, targetedHitTotal, maxMachNum, srcRow, dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
             If partnerRow = 0 Then
                 Dim tmpUsedMark As Long: tmpUsedMark = srcRow
                 rowUsed(tmpUsedMark) = True ' この候補は今回使えないので一時的に使用済み扱いにして次を探す
@@ -341,9 +376,9 @@ End Function
 
 ' 同じ段の未使用ロケーションの中から、超過機番(excludeMach)以外で最も目標構成比を下回っている機番の
 ' ロケーションを1件返す(0=無し)。目標未設定の機番は対象外にする
-Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean, rowMach() As Long, ByVal excludeMach As Long, actualCountByMach As Object, dictTargetRatio As Object, ByVal targetRatioSum As Double, ByVal targetedHitTotal As Double, ByVal maxMachNum As Long) As Long
+Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean, rowMach() As Long, ByVal excludeMach As Long, actualCountByMach As Object, dictTargetRatio As Object, ByVal targetRatioSum As Double, ByVal targetedHitTotal As Double, ByVal maxMachNum As Long, ByVal srcRow As Long, dictRowMach As Object, dictRowCat As Object, dictRowWt As Object, dictRowVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Long
     Dim bestRow As Long: bestRow = 0
-    Dim bestDev As Double: bestDev = 0 ' 0未満(目標未達)のみを対象にするため、初期値0からより小さい値を探す
+    Dim bestScore As Double: bestScore = 0 ' 0未満(目標未達)のみを対象にするため、初期値0からより小さい値を探す
     Dim v As Variant
     For Each v In rowsCol
         Dim idx As Long: idx = CLng(v)
@@ -354,8 +389,12 @@ Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean,
                     Dim pActRatio As Double: pActRatio = GetMachRatio(pMach, actualCountByMach, targetedHitTotal)
                     Dim pTgtRatio As Double: pTgtRatio = dictTargetRatio(CStr(pMach)) / targetRatioSum
                     Dim pDev As Double: pDev = pActRatio - pTgtRatio
-                    If pDev < bestDev Then
-                        bestDev = pDev
+                    ' 商品属性マスタが読み込まれていれば、目標未達度に「同カテゴリー集中度・サイズ差・重量差」の
+                    ' ソフトなペナルティを加味する(Module3のComputeAttrPenaltyを共用。未読込なら常に0で従来どおり)
+                    Dim pScore As Double
+                    pScore = pDev + ComputeAttrPenalty(CStr(idx), CStr(srcRow), dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                    If pScore < bestScore Then
+                        bestScore = pScore
                         bestRow = idx
                     End If
                 End If
