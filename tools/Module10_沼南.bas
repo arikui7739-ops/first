@@ -44,7 +44,7 @@ Sub CreateRelocationPlan()
     Dim dictItemCategory As Object: Set dictItemCategory = CreateObject("Scripting.Dictionary")
     Dim dictItemWeightMaster As Object: Set dictItemWeightMaster = CreateObject("Scripting.Dictionary")
     Dim dictItemVolumeMaster As Object: Set dictItemVolumeMaster = CreateObject("Scripting.Dictionary")
-    Call LoadItemAttributeMasterIfSelected(dictItemCategory, dictItemWeightMaster, dictItemVolumeMaster)
+    Call LoadItemAttributeMasterFromSheet(dictItemCategory, dictItemWeightMaster, dictItemVolumeMaster)
 
     Dim relocCount As Long: relocCount = GetRelocationCandidateCount()
 

@@ -154,7 +154,7 @@ Sub OptimizeABFormationFlow()
         ' 0.8 商品属性マスタ(任意、在庫状況ダウンロード=WF021L1形式)の読込。
         ' サイズ・重量・カテゴリーが分かれば、入替候補選定でこれまで人が目視判断していた
         ' 「同カテゴリーが集中しない」「サイズ・重量が近い」をスコアの目安に反映できる
-        Call LoadItemAttributeMasterIfSelected(dictItemCategory, dictItemWeightMaster, dictItemVolumeMaster)
+        Call LoadItemAttributeMasterFromSheet(dictItemCategory, dictItemWeightMaster, dictItemVolumeMaster)
 
         ' 1. ファイル選択(複数選択・全ファイル形式)
         Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -1393,8 +1393,140 @@ End Sub
 ' 1～3行目はタイトル・空行・見出し行、4行目以降が空行またはデータ行(先頭の拠点コード等が数値のみ)。
 ' D列(4列目)=商品コード、103列目=大分類コード、68～71列目=参考の縦/横/高/重量、
 ' 84～87列目=実測の縦/横/高/重量(実測が無ければ参考を使う)
-Sub LoadItemAttributeMasterIfSelected(dictItemCategory As Object, dictItemWeightMaster As Object, dictItemVolumeMaster As Object)
-    ' 「設定」シートのチェックボックス(L13)がオフなら、ファイル選択ダイアログ自体を出さずに終える
+' 商品属性マスタ(在庫状況ダウンロード・WF021L1形式のCSV)を取り込み、「商品属性マスタ」シートに保存する。
+' 予測データ取込(Module8)と同様に一度取り込めば済み、以降はマクロ実行のたびにファイルを選び直す必要がない
+' (「商品属性マスタ」シートが残っている限り、AB編成動線最適化・ロケ変指示はそこから読み込む)。
+' 既存の「商品属性マスタ」シートは削除してから作り直すため、再取込すると内容が更新される
+Sub ImportItemAttributeMaster()
+    Call EnsureItemAttributeImportButton
+
+    Dim fd5 As Office.FileDialog
+    Set fd5 = Application.FileDialog(msoFileDialogFilePicker)
+    With fd5
+        .Title = "商品属性マスタ(在庫状況ダウンロード・WF021L1形式のCSV)を選択"
+        .Filters.Clear
+        .Filters.Add "すべてのファイル", "*.*"
+        .AllowMultiSelect = False
+        If .Show = False Then Exit Sub
+    End With
+
+    Dim filePath5 As String: filePath5 = fd5.SelectedItems(1)
+    Dim fileDate5 As Date: fileDate5 = FileDateTime(filePath5)
+
+    Application.ScreenUpdating = False
+    Application.Calculation = xlCalculationManual
+    Application.EnableEvents = False
+    Application.DisplayAlerts = False
+
+    Dim fileNo5 As Integer: fileNo5 = FreeFile
+    Dim textLine5 As String
+    Dim outRows As Collection: Set outRows = New Collection
+
+    Open filePath5 For Input As #fileNo5
+    Do While Not EOF(fileNo5)
+        Line Input #fileNo5, textLine5
+        Dim cols5() As String: cols5 = Split(textLine5, ",")
+        If UBound(cols5) >= 104 Then
+            Dim rawCode5 As String: rawCode5 = Trim(cols5(3)) ' 4列目:商品コード
+            If rawCode5 <> "" And IsNumeric(rawCode5) Then
+                Dim codeKey5 As String: codeKey5 = CStr(CLng(rawCode5))
+                Dim catL5 As String: catL5 = Trim(cols5(102)) ' 大分類コード
+                Dim catM5 As String: catM5 = Trim(cols5(103)) ' 中分類コード
+                Dim catS5 As String: catS5 = Trim(cols5(104)) ' 小分類コード
+
+                ' 重量:実測(87列目)を優先、無ければ参考(71列目)を使う
+                Dim wStr5 As String: wStr5 = Trim(cols5(86))
+                If Not (IsNumeric(wStr5) And CDbl(wStr5) > 0) Then wStr5 = Trim(cols5(70))
+
+                ' サイズ(縦横高):実測(84～86列目)を優先、無ければ参考(68～70列目)を使う
+                Dim dStr5 As String, wdStr5 As String, hStr5 As String
+                dStr5 = Trim(cols5(83)): wdStr5 = Trim(cols5(84)): hStr5 = Trim(cols5(85))
+                If Not (IsNumeric(dStr5) And IsNumeric(wdStr5) And IsNumeric(hStr5) And CDbl(dStr5) > 0 And CDbl(wdStr5) > 0) Then
+                    dStr5 = Trim(cols5(67)): wdStr5 = Trim(cols5(68)): hStr5 = Trim(cols5(69))
+                End If
+
+                Dim rowArr5(1 To 8) As Variant
+                rowArr5(1) = codeKey5
+                rowArr5(2) = catL5
+                rowArr5(3) = catM5
+                rowArr5(4) = catS5
+                rowArr5(5) = IIf(IsNumeric(dStr5), CDbl(dStr5), 0)
+                rowArr5(6) = IIf(IsNumeric(wdStr5), CDbl(wdStr5), 0)
+                rowArr5(7) = IIf(IsNumeric(hStr5), CDbl(hStr5), 0)
+                rowArr5(8) = IIf(IsNumeric(wStr5), CDbl(wStr5), 0)
+                outRows.Add rowArr5
+            End If
+        End If
+    Loop
+    Close #fileNo5
+
+    If outRows.Count = 0 Then
+        Application.Calculation = xlCalculationAutomatic
+        Application.EnableEvents = True
+        Application.ScreenUpdating = True
+        MsgBox "商品コードを含むデータ行が見つかりませんでした。ファイルの内容を確認してください。", vbExclamation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    Sheets("商品属性マスタ").Delete
+    On Error GoTo 0
+
+    Dim wsAttr As Worksheet
+    Dim wsPanel5 As Worksheet
+    On Error Resume Next
+    Set wsPanel5 = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If Not wsPanel5 Is Nothing Then
+        Set wsAttr = ThisWorkbook.Sheets.Add(Before:=wsPanel5)
+    Else
+        Set wsAttr = Sheets.Add
+    End If
+    wsAttr.Name = "商品属性マスタ"
+
+    wsAttr.Columns("A:A").NumberFormat = "@" ' 品コードは先頭ゼロ落ち防止のため文字列扱いにする
+
+    wsAttr.Range("A1:H1").Merge
+    wsAttr.Range("A1").Value = "【商品属性マスタ取込】ファイル: " & Dir(filePath5) & _
+        "　／　ファイル更新日時: " & Format(fileDate5, "yyyy/mm/dd hh:mm") & _
+        "　／　取込日時: " & Format(Now, "yyyy/mm/dd hh:mm")
+    wsAttr.Range("A1").Font.Bold = True: wsAttr.Range("A1").Font.Size = 12
+    wsAttr.Range("A1").HorizontalAlignment = xlLeft
+
+    Const HEADER_ROW5 As Long = 3
+    wsAttr.Range("A3:H3").Value = Array("品コード", "大分類コード", "中分類コード", "小分類コード", "縦", "横", "高", "重量(kg)")
+    wsAttr.Range("A3:H3").Interior.Color = RGB(220, 230, 255)
+    wsAttr.Range("A3:H3").Font.Bold = True
+
+    Dim outArr5() As Variant
+    ReDim outArr5(1 To outRows.Count, 1 To 8)
+    Dim ri5 As Long: ri5 = 0
+    Dim rv5 As Variant
+    For Each rv5 In outRows
+        ri5 = ri5 + 1
+        Dim c5 As Long
+        For c5 = 1 To 8
+            outArr5(ri5, c5) = rv5(c5)
+        Next c5
+    Next rv5
+    wsAttr.Range(wsAttr.Cells(HEADER_ROW5 + 1, 1), wsAttr.Cells(HEADER_ROW5 + outRows.Count, 8)).Value = outArr5
+
+    wsAttr.Range("A3:H3").AutoFilter
+    wsAttr.Columns("A:H").AutoFit
+    wsAttr.Rows(1).RowHeight = 20
+
+    Application.Calculation = xlCalculationAutomatic
+    Application.EnableEvents = True
+    Application.ScreenUpdating = True
+
+    MsgBox "「商品属性マスタ」シートを更新しました。(" & outRows.Count & "件取込)" & vbCrLf & _
+        "以降、AB編成動線最適化・ロケ変指示はこのシートのデータを使います(ファイル選択は不要です)。", vbInformation
+End Sub
+
+' 「商品属性マスタ」シート(ImportItemAttributeMasterで取込済み)から、カテゴリー・重量・体積を読み込む。
+' シートが無い場合、または「設定」シートのチェックボックス(L13)がオフの場合は何もしない(辞書は空のまま=
+' 従来どおりの動作になる)。ファイル選択ダイアログは出さない(取込はImportItemAttributeMasterの役目)
+Sub LoadItemAttributeMasterFromSheet(dictItemCategory As Object, dictItemWeightMaster As Object, dictItemVolumeMaster As Object)
     Dim wsSetChk As Worksheet
     On Error Resume Next
     Set wsSetChk = ThisWorkbook.Sheets("設定")
@@ -1403,63 +1535,68 @@ Sub LoadItemAttributeMasterIfSelected(dictItemCategory As Object, dictItemWeight
         If wsSetChk.Range("L13").Value = False Then Exit Sub
     End If
 
-    ' 「カテゴリー粒度」(L12)に応じて、WF021L1形式CSVの何列目をカテゴリーコードとして使うかを決める
-    ' (103列目=大分類、104列目=中分類、105列目=小分類。0始まりの配列添字ではそれぞれ102/103/104)
-    Dim catColIdx4 As Long: catColIdx4 = 102
+    Dim wsAttr As Worksheet
+    On Error Resume Next
+    Set wsAttr = ThisWorkbook.Sheets("商品属性マスタ")
+    On Error GoTo 0
+    If wsAttr Is Nothing Then Exit Sub
+
+    ' 「カテゴリー粒度」(L12)に応じて、大分類(B列)/中分類(C列)/小分類(D列)のどれを使うかを決める
+    Dim catCol5 As Long: catCol5 = 2
     If Not wsSetChk Is Nothing Then
         Select Case Trim(CStr(wsSetChk.Range("L12").Value))
-            Case "中分類": catColIdx4 = 103
-            Case "小分類": catColIdx4 = 104
-            Case Else: catColIdx4 = 102
+            Case "中分類": catCol5 = 3
+            Case "小分類": catCol5 = 4
+            Case Else: catCol5 = 2
         End Select
     End If
 
-    Dim fd4 As Office.FileDialog
-    Set fd4 = Application.FileDialog(msoFileDialogFilePicker)
-    With fd4
-        .Title = "商品属性マスタ(在庫状況ダウンロード・WF021L1形式のCSV)を選択(任意・キャンセルで未使用)"
-        .Filters.Clear
-        .Filters.Add "すべてのファイル", "*.*"
-        .AllowMultiSelect = False
-        If .Show = False Then Exit Sub
-    End With
+    Const HEADER_ROW6 As Long = 3
+    Dim lastRow6 As Long: lastRow6 = wsAttr.Cells(wsAttr.Rows.Count, 1).End(xlUp).Row
+    Dim r6 As Long
+    For r6 = HEADER_ROW6 + 1 To lastRow6
+        Dim codeKey6 As String: codeKey6 = Trim(CStr(wsAttr.Cells(r6, 1).Value))
+        If codeKey6 <> "" And IsNumeric(codeKey6) Then
+            codeKey6 = CStr(CLng(codeKey6))
+            Dim catVal6 As String: catVal6 = Trim(CStr(wsAttr.Cells(r6, catCol5).Value))
+            If catVal6 <> "" And Not dictItemCategory.Exists(codeKey6) Then dictItemCategory.Add codeKey6, catVal6
 
-    Dim filePath4 As String: filePath4 = fd4.SelectedItems(1)
-    Dim fileNo4 As Integer: fileNo4 = FreeFile
-    Dim textLine4 As String
-    Open filePath4 For Input As #fileNo4
-    Do While Not EOF(fileNo4)
-        Line Input #fileNo4, textLine4
-        Dim cols4() As String: cols4 = Split(textLine4, ",")
-        If UBound(cols4) >= 104 Then ' カテゴリー粒度が小分類(105列目)でも安全に読めるよう104以上を要求する
-            Dim rawCode4 As String: rawCode4 = Trim(cols4(3)) ' 4列目:商品コード
-            If rawCode4 <> "" And IsNumeric(rawCode4) Then
-                Dim codeKey4 As String: codeKey4 = CStr(CLng(rawCode4))
+            Dim d6 As Double: d6 = Val(wsAttr.Cells(r6, 5).Value)
+            Dim w6 As Double: w6 = Val(wsAttr.Cells(r6, 6).Value)
+            Dim h6 As Double: h6 = Val(wsAttr.Cells(r6, 7).Value)
+            Dim wt6 As Double: wt6 = Val(wsAttr.Cells(r6, 8).Value)
 
-                Dim catCode4 As String: catCode4 = Trim(cols4(catColIdx4)) ' 「カテゴリー粒度」設定に応じた列(既定は103列目:大分類コード)
-                If catCode4 <> "" And Not dictItemCategory.Exists(codeKey4) Then dictItemCategory.Add codeKey4, catCode4
-
-                ' 重量:実測(87列目)を優先、無ければ参考(71列目)を使う
-                Dim wStr4 As String: wStr4 = Trim(cols4(86))
-                If Not (IsNumeric(wStr4) And CDbl(wStr4) > 0) Then wStr4 = Trim(cols4(70))
-                If IsNumeric(wStr4) And CDbl(wStr4) > 0 And Not dictItemWeightMaster.Exists(codeKey4) Then
-                    dictItemWeightMaster.Add codeKey4, CDbl(wStr4)
-                End If
-
-                ' サイズ(体積=縦×横×高):実測(84～86列目)を優先、無ければ参考(68～70列目)を使う
-                Dim dStr4 As String, wdStr4 As String, hStr4 As String
-                dStr4 = Trim(cols4(83)): wdStr4 = Trim(cols4(84)): hStr4 = Trim(cols4(85))
-                If Not (IsNumeric(dStr4) And IsNumeric(wdStr4) And IsNumeric(hStr4) And CDbl(dStr4) > 0 And CDbl(wdStr4) > 0) Then
-                    dStr4 = Trim(cols4(67)): wdStr4 = Trim(cols4(68)): hStr4 = Trim(cols4(69))
-                End If
-                If IsNumeric(dStr4) And IsNumeric(wdStr4) And IsNumeric(hStr4) And Not dictItemVolumeMaster.Exists(codeKey4) Then
-                    Dim volVal4 As Double: volVal4 = CDbl(dStr4) * CDbl(wdStr4) * CDbl(hStr4)
-                    If volVal4 > 0 Then dictItemVolumeMaster.Add codeKey4, volVal4
-                End If
+            If wt6 > 0 And Not dictItemWeightMaster.Exists(codeKey6) Then dictItemWeightMaster.Add codeKey6, wt6
+            If d6 > 0 And w6 > 0 And h6 > 0 And Not dictItemVolumeMaster.Exists(codeKey6) Then
+                dictItemVolumeMaster.Add codeKey6, d6 * w6 * h6
             End If
         End If
-    Loop
-    Close #fileNo4
+    Next r6
+End Sub
+
+' 「操作パネル」シートに商品属性マスタ取込ボタンが無ければ追加する
+Sub EnsureItemAttributeImportButton()
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If wsPanel Is Nothing Then Exit Sub
+
+    Dim existing As Shape
+    On Error Resume Next
+    Set existing = wsPanel.Shapes("商品属性マスタ取込ボタン")
+    On Error GoTo 0
+    If existing Is Nothing Then
+        Dim btn As Button
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("H4").Left, wsPanel.Range("H4").Top, 220, 36)
+        btn.Name = "商品属性マスタ取込ボタン"
+        btn.OnAction = "ImportItemAttributeMaster"
+        btn.Characters.Text = "商品属性マスタを取り込む"
+        btn.Font.Size = 12
+        btn.Font.Bold = True
+    End If
+
+    Call LayoutPanelButtons
 End Sub
 
 ' locKey(機番+段+列)に対応する品コードをCFシート等の対応表(dictLocCode)から引き、
@@ -1539,7 +1676,9 @@ Sub EnsureOperationPanelSheet()
         "③「予測構成比グラフを作成」「実績構成比グラフを作成」でグラフを作成(実績側はS71ファイルが必要)" & vbCrLf
     panelDesc = panelDesc & _
         "④「ロケ変指示を作成」でロケ変指示を作成(予測データの取込と、「設定」シートの■機番別目標構成比の入力が必要)" & vbCrLf & _
-        "⑤「同時ピッキング改善指示を作成」でピッキング実績ファイル(S71)を解析(品名マスタは任意)" & vbCrLf & vbCrLf & _
+        "⑤「同時ピッキング改善指示を作成」でピッキング実績ファイル(S71)を解析(品名マスタは任意)" & vbCrLf & _
+        "⑥「商品属性マスタを取り込む」で在庫状況ダウンロード(WF021L1形式)を取り込むと(任意)、①④の入替候補選定に" & _
+        "サイズ・重量・カテゴリーの近さが反映されます(一度取り込めば以降のファイル選択は不要です)。" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
         "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・ロケ変候補件数・最大機番・" & _
         "AB間口数・機番別目標構成比などは「設定」シートで変更できます(シートが無ければ実行時に自動作成されます)。" & _
@@ -1567,6 +1706,7 @@ Sub EnsureOperationPanelSheet()
     ' このマクロだけを実行しても5つのボタンがすべて揃うよう、他モジュールのボタンも一緒に用意する
     ' (Module1・Module8・Module9・Module10は同じVBAプロジェクトに揃っている前提。揃っていないとここでコンパイルエラーになる)
     Call EnsurePredictionImportButton
+    Call EnsureItemAttributeImportButton
     Call EnsureRatioChartButtons
     Call EnsureRelocationPlanButton
     Call EnsureSwapCorrelationButton
@@ -1593,7 +1733,7 @@ Sub LayoutPanelButtons()
     Dim baseTop As Double: baseTop = wsPanel.Range("H4").Top
 
     Dim orderNames As Variant
-    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン", "同時ピッキング改善指示ボタン")
+    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "商品属性マスタ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン", "同時ピッキング改善指示ボタン")
 
     Dim idx As Long, placedCount As Long: placedCount = 0
     For idx = LBound(orderNames) To UBound(orderNames)
@@ -1828,7 +1968,7 @@ Sub EnsureAttrCheckBox(wsSet As Worksheet)
         Set chkAttr = wsSet.CheckBoxes.Add(wsSet.Range("L13").Left, wsSet.Range("L13").Top - 2, 110, 18)
         chkAttr.Name = "商品属性マスタ考慮チェック"
         chkAttr.LinkedCell = "$L$13"
-        chkAttr.Value = xlOn ' オフにすると、商品属性マスタのファイル選択ダイアログ自体を出さずスキップする
+        chkAttr.Value = xlOn ' オフにすると、「商品属性マスタ」シートを取込済みでも入替候補選定への反映をスキップする
     Else
         chkAttr.Left = wsSet.Range("L13").Left
         chkAttr.Top = wsSet.Range("L13").Top - 2
