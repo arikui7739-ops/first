@@ -39,7 +39,7 @@ Sub CreateRelocationPlan()
     Dim weightWeightCoef As Double: weightWeightCoef = 0.01
     Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount, dictTargetRatio, catWeight, sizeWeight, weightWeightCoef)
 
-    ' 商品属性マスタ(任意、Module3と共通)。読み込めば、入替候補選定で入替先号機の同カテゴリー品集中度・
+    ' 在庫商品マスタ(任意、Module3と共通)。読み込めば、入替候補選定で入替先号機の同カテゴリー品集中度・
     ' サイズ差・重量差をソフトなペナルティとして反映する(未読込なら従来どおりの選定結果になる)
     Dim dictItemCategory As Object: Set dictItemCategory = CreateObject("Scripting.Dictionary")
     Dim dictItemWeightMaster As Object: Set dictItemWeightMaster = CreateObject("Scripting.Dictionary")
@@ -103,7 +103,7 @@ Sub CreateRelocationPlan()
     Dim dictByDan As Object: Set dictByDan = CreateObject("Scripting.Dictionary") ' 段→その段のロケーション行(添字)のCollection
     Dim dictByMach As Object: Set dictByMach = CreateObject("Scripting.Dictionary") ' 号機→その号機のロケーション行(添字)のCollection
     Dim dictRowMach As Object: Set dictRowMach = CreateObject("Scripting.Dictionary") ' 行番号(文字列)→号機(商品属性ペナルティ計算用)
-    Dim dictRowCat As Object: Set dictRowCat = CreateObject("Scripting.Dictionary") ' 行番号→大分類コード等(商品属性マスタ)
+    Dim dictRowCat As Object: Set dictRowCat = CreateObject("Scripting.Dictionary") ' 行番号→大分類コード等(在庫商品マスタ)
     Dim dictRowWt As Object: Set dictRowWt = CreateObject("Scripting.Dictionary") ' 行番号→重量(kg)
     Dim dictRowVol As Object: Set dictRowVol = CreateObject("Scripting.Dictionary") ' 行番号→体積
     Dim dictMachCatCount As Object: Set dictMachCatCount = CreateObject("Scripting.Dictionary") ' "号機|大分類コード"→その号機内の同カテゴリー品数
@@ -139,7 +139,7 @@ Sub CreateRelocationPlan()
                             rowCnt(rowN) = forecastCnt
                             rowUsed(rowN) = False
 
-                            ' 商品属性マスタが読み込まれていれば、行番号をキーにカテゴリー・重量・体積を引けるようにする
+                            ' 在庫商品マスタが読み込まれていれば、行番号をキーにカテゴリー・重量・体積を引けるようにする
                             Dim rowKey As String: rowKey = CStr(rowN)
                             dictRowMach(rowKey) = mach
                             If itemCodeStr <> "" And IsNumeric(itemCodeStr) Then
@@ -391,7 +391,7 @@ Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean,
                     Dim pActRatio As Double: pActRatio = GetMachRatio(pMach, actualCountByMach, targetedHitTotal)
                     Dim pTgtRatio As Double: pTgtRatio = dictTargetRatio(CStr(pMach)) / targetRatioSum
                     Dim pDev As Double: pDev = pActRatio - pTgtRatio
-                    ' 商品属性マスタが読み込まれていれば、目標未達度に「同カテゴリー集中度・サイズ差・重量差」の
+                    ' 在庫商品マスタが読み込まれていれば、目標未達度に「同カテゴリー集中度・サイズ差・重量差」の
                     ' ソフトなペナルティを加味する(Module3のComputeAttrPenaltyを共用。未読込なら常に0で従来どおり)
                     Dim pScore As Double
                     pScore = pDev + ComputeAttrPenalty(CStr(idx), CStr(srcRow), dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
