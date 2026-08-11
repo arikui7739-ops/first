@@ -453,6 +453,9 @@ Sub OptimizeABFormationFlow()
 
     For r = 1 To pCnt
         If outCnt >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
+        ' 候補ペアが多いと探索に時間がかかることがあるため、Excelが「応答なし」に見えないよう
+        ' 一定回数ごとに制御をOSに戻す(処理自体は継続する)
+        If r Mod 200 = 0 Then DoEvents
 
         Dim aItem As String: aItem = CStr(pairArr(r, 5))
         Dim mItem As String: mItem = CStr(pairArr(r, 7))
@@ -738,6 +741,9 @@ Sub OptimizeABFormationFlow()
             Dim rsm As Long
             For rsm = 1 To smCnt
                 If outCntSM >= maxSwapRows Then Exit For ' 入替候補(スコア順)は設定件数まで
+                ' 候補ペアが多いと探索に時間がかかることがあるため、Excelが「応答なし」に見えないよう
+                ' 一定回数ごとに制御をOSに戻す(処理自体は継続する)
+                If rsm Mod 200 = 0 Then DoEvents
 
                 Dim aItemSM As String: aItemSM = CStr(smPairArr(rsm, 3))
                 Dim mItemSM As String: mItemSM = CStr(smPairArr(rsm, 5))
@@ -1107,6 +1113,14 @@ End Sub
 Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictItemMach As Object, dictTargetRatio As Object, machHitLive() As Double, ByVal targetedHitTotal As Double, ByVal targetRatioSum As Double, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As String
     Dim bestDev As Double: bestDev = 2# ' 比率の差の理論上の最大値(-1～1)より大きい値で初期化
     Dim bestCand As String: bestCand = ""
+
+    ' moverアイテム(excludeItem2)の属性は候補走査の前に1回だけ解決しておく(候補ごとに辞書引きし直すと、
+    ' 候補数が多いときに無駄な処理が積み重なって動作が重くなるため)
+    Dim moverHasCat As Boolean, moverCat As String
+    Dim moverHasWt As Boolean, moverWt As Double
+    Dim moverHasVol As Boolean, moverVol As Double
+    Call ResolveMoverAttr(excludeItem2, dictItemCat, dictItemWt, dictItemVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol)
+
     Dim zKey As Variant
     For Each zKey In zoneItems.Keys
         If CInt(zKey) <> anchorZone Then
@@ -1124,7 +1138,7 @@ Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer
                             ' 在庫商品マスタが読み込まれていれば、比率の差に「同カテゴリー集中度・サイズ差・重量差」の
                             ' ソフトなペナルティを加味する(未読込なら常に0で従来と同じ結果になる)
                             Dim combinedScore As Double
-                            combinedScore = dev + ComputeAttrPenalty(candStr, excludeItem2, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                            combinedScore = dev + ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatCount, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
                             If combinedScore < bestDev Then
                                 bestDev = combinedScore
                                 bestCand = candStr
@@ -1144,6 +1158,15 @@ Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeI
     Dim hasAttrData As Boolean: hasAttrData = (dictItemCat.Count > 0 Or dictItemVol.Count > 0 Or dictItemWt.Count > 0)
     Dim bestPenalty As Double: bestPenalty = -1
     Dim bestCand As String: bestCand = ""
+
+    ' moverアイテム(excludeItem2)の属性は候補走査の前に1回だけ解決しておく(候補ごとの辞書引きを減らして高速化)
+    Dim moverHasCat As Boolean, moverCat As String
+    Dim moverHasWt As Boolean, moverWt As Double
+    Dim moverHasVol As Boolean, moverVol As Double
+    If hasAttrData Then
+        Call ResolveMoverAttr(excludeItem2, dictItemCat, dictItemWt, dictItemVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol)
+    End If
+
     Dim zKey As Variant
     For Each zKey In zoneItems.Keys
         If CInt(zKey) <> anchorZone Then
@@ -1159,7 +1182,7 @@ Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeI
                             Exit Function
                         End If
                         Dim candPenalty As Double
-                        candPenalty = ComputeAttrPenalty(candStr, excludeItem2, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                        candPenalty = ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatCount, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
                         If bestPenalty < 0 Or candPenalty < bestPenalty Then
                             bestPenalty = candPenalty
                             bestCand = candStr
@@ -1176,26 +1199,38 @@ End Function
 ' ①入替先候補が属する機番に、moverと同じ大分類コードの品が既にどれだけあるか(多いほど加点=同時ピッキング集中リスク)。
 ' ②候補とmoverのサイズ(体積)・重量の差(対数比。値が大きいほど物理的な入替えにくさが増す)。
 ' 在庫商品マスタが未読込(各dictが空)の品目は該当項目を単純にスキップする(0加点のまま)
-Function ComputeAttrPenalty(candStr As String, mItem As String, dictItemMach As Object, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Double
+Function ComputeAttrPenalty(candStr As String, dictItemMach As Object, dictItemVol As Object, dictItemWt As Object, dictMachCatCount As Object, ByVal moverHasCat As Boolean, ByVal moverCat As String, ByVal moverHasWt As Boolean, ByVal moverWt As Double, ByVal moverHasVol As Boolean, ByVal moverVol As Double, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Double
     Dim penalty As Double: penalty = 0
-    If dictItemCat.Exists(mItem) Then
-        Dim tallyKey As String: tallyKey = CStr(dictItemMach(candStr)) & "|" & dictItemCat(mItem)
+    If moverHasCat Then
+        Dim tallyKey As String: tallyKey = CStr(dictItemMach(candStr)) & "|" & moverCat
         If dictMachCatCount.Exists(tallyKey) Then
             penalty = penalty + catWeight * dictMachCatCount(tallyKey)
         End If
     End If
-    If dictItemVol.Exists(candStr) And dictItemVol.Exists(mItem) Then
-        If dictItemVol(candStr) > 0 And dictItemVol(mItem) > 0 Then
-            penalty = penalty + sizeWeight * Abs(Log(dictItemVol(candStr) / dictItemVol(mItem)))
+    If moverHasVol And dictItemVol.Exists(candStr) Then
+        If dictItemVol(candStr) > 0 And moverVol > 0 Then
+            penalty = penalty + sizeWeight * Abs(Log(dictItemVol(candStr) / moverVol))
         End If
     End If
-    If dictItemWt.Exists(candStr) And dictItemWt.Exists(mItem) Then
-        If dictItemWt(candStr) > 0 And dictItemWt(mItem) > 0 Then
-            penalty = penalty + weightWeightCoef * Abs(Log(dictItemWt(candStr) / dictItemWt(mItem)))
+    If moverHasWt And dictItemWt.Exists(candStr) Then
+        If dictItemWt(candStr) > 0 And moverWt > 0 Then
+            penalty = penalty + weightWeightCoef * Abs(Log(dictItemWt(candStr) / moverWt))
         End If
     End If
     ComputeAttrPenalty = penalty
 End Function
+
+' candStrアイテムの属性(カテゴリー・重量・体積)を1回だけ解決する(候補走査ループの前に1回だけ呼ぶ想定)。
+' ComputeAttrPenaltyを候補ごとに呼ぶたびにmoverの辞書引きをやり直すと、候補数が多いロケ変指示などで
+' 無駄な処理が積み重なり動作が重くなるため、事前に解決した値を使い回す形にしている
+Sub ResolveMoverAttr(mItem As String, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, ByRef moverHasCat As Boolean, ByRef moverCat As String, ByRef moverHasWt As Boolean, ByRef moverWt As Double, ByRef moverHasVol As Boolean, ByRef moverVol As Double)
+    moverHasCat = dictItemCat.Exists(mItem)
+    If moverHasCat Then moverCat = dictItemCat(mItem)
+    moverHasWt = dictItemWt.Exists(mItem)
+    If moverHasWt Then moverWt = dictItemWt(mItem)
+    moverHasVol = dictItemVol.Exists(mItem)
+    If moverHasVol Then moverVol = dictItemVol(mItem)
+End Sub
 
 ' 1つのゾーン内で、奇数号機・偶数号機の組み方まで含めて最適配置した場合の
 ' 「理論上最小の対面ヒット数」を局所探索(Kernighan-Linに近い2分割法)で求める。

@@ -216,6 +216,9 @@ Sub CreateRelocationPlan()
     Do While outCnt < relocCount
         safetyCounter = safetyCounter + 1
         If safetyCounter > maxAttempts Then Exit Do
+        ' 候補が多いと探索に時間がかかることがあるため、Excelが「応答なし」に見えないよう
+        ' 一定回数ごとに制御をOSに戻す(処理自体は継続する)
+        If safetyCounter Mod 10 = 0 Then DoEvents
 
         ' 現時点で目標構成比を最も上回っていて、かつまだ諦めていない号機を探す
         Dim bestOverMach As String: bestOverMach = ""
@@ -381,6 +384,14 @@ End Function
 Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean, rowMach() As Long, ByVal excludeMach As Long, actualCountByMach As Object, dictTargetRatio As Object, ByVal targetRatioSum As Double, ByVal targetedHitTotal As Double, abBlockFrom() As Long, abBlockTo() As Long, ByVal abBlockCount As Long, ByVal srcRow As Long, dictRowMach As Object, dictRowCat As Object, dictRowWt As Object, dictRowVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Long
     Dim bestRow As Long: bestRow = 0
     Dim bestScore As Double: bestScore = 0 ' 0未満(目標未達)のみを対象にするため、初期値0からより小さい値を探す
+
+    ' moverアイテム(srcRow)の属性は候補走査の前に1回だけ解決しておく(候補ごとに辞書引きし直すと、
+    ' 候補数の多いロケ変指示では無駄な処理が積み重なって動作が重くなるため。Module3のResolveMoverAttrを共用)
+    Dim moverHasCat As Boolean, moverCat As String
+    Dim moverHasWt As Boolean, moverWt As Double
+    Dim moverHasVol As Boolean, moverVol As Double
+    Call ResolveMoverAttr(CStr(srcRow), dictRowCat, dictRowWt, dictRowVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol)
+
     Dim v As Variant
     For Each v In rowsCol
         Dim idx As Long: idx = CLng(v)
@@ -394,7 +405,7 @@ Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean,
                     ' 在庫商品マスタが読み込まれていれば、目標未達度に「同カテゴリー集中度・サイズ差・重量差」の
                     ' ソフトなペナルティを加味する(Module3のComputeAttrPenaltyを共用。未読込なら常に0で従来どおり)
                     Dim pScore As Double
-                    pScore = pDev + ComputeAttrPenalty(CStr(idx), CStr(srcRow), dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                    pScore = pDev + ComputeAttrPenalty(CStr(idx), dictRowMach, dictRowVol, dictRowWt, dictMachCatCount, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
                     If pScore < bestScore Then
                         bestScore = pScore
                         bestRow = idx
