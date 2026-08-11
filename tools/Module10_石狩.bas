@@ -392,7 +392,7 @@ End Function
 ' ロケーションを1件返す(0=無し)。目標未設定の機番は対象外にする
 Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean, rowMach() As Long, ByVal excludeMach As Long, actualCountByMach As Object, dictTargetRatio As Object, ByVal targetRatioSum As Double, ByVal targetedHitTotal As Double, ByVal maxMachNum As Long, ByVal srcRow As Long, dictRowMach As Object, dictRowCat As Object, dictRowWt As Object, dictRowVol As Object, dictMachCatVol As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Long
     Dim bestRow As Long: bestRow = 0
-    Dim bestScore As Double: bestScore = 0 ' 0未満(目標未達)のみを対象にするため、初期値0からより小さい値を探す
+    Dim bestScore As Double: bestScore = 0 ' 目標未達(pDev<0)の候補の中で、カテゴリー・サイズも加味した最良のものを選ぶ
 
     ' moverアイテム(srcRow)の属性は候補走査の前に1回だけ解決しておく(候補ごとに辞書引きし直すと、
     ' 候補数の多いロケ変指示では無駄な処理が積み重なって動作が重くなるため。Module3のResolveMoverAttrを共用)
@@ -411,13 +411,13 @@ Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean,
                     Dim pActRatio As Double: pActRatio = GetMachRatio(pMach, actualCountByMach, targetedHitTotal)
                     Dim pTgtRatio As Double: pTgtRatio = dictTargetRatio(CStr(pMach)) / targetRatioSum
                     Dim pDev As Double: pDev = pActRatio - pTgtRatio
-                    ' 在庫商品マスタが読み込まれていれば、目標未達度に「同カテゴリー集中度・サイズ差・重量差」の
-                    ' ソフトなペナルティを加味する(Module3のComputeAttrPenaltyを共用。未読込なら常に0で従来どおり)
-                    Dim pScore As Double
-                    pScore = pDev + ComputeAttrPenalty(CStr(idx), dictRowMach, dictRowVol, dictRowWt, dictMachCatVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
-                    If pScore < bestScore Then
-                        bestScore = pScore
-                        bestRow = idx
+                    If pDev < 0 Then
+                        Dim pScore As Double
+                        pScore = pDev + ComputeAttrPenalty(CStr(idx), dictRowMach, dictRowVol, dictRowWt, dictMachCatVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
+                        If bestRow = 0 Or pScore < bestScore Then
+                            bestScore = pScore
+                            bestRow = idx
+                        End If
                     End If
                 End If
             End If
