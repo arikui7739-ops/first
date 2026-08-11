@@ -1610,25 +1610,30 @@ Sub LoadItemAttributeMasterFromSheet(dictItemCategory As Object, dictItemWeightM
 
     Const HEADER_ROW6 As Long = 3
     Dim lastRow6 As Long: lastRow6 = wsAttr.Cells(wsAttr.Rows.Count, 1).End(xlUp).Row
-    Dim r6 As Long
-    For r6 = HEADER_ROW6 + 1 To lastRow6
-        Dim codeKey6 As String: codeKey6 = Trim(CStr(wsAttr.Cells(r6, 1).Value))
-        If codeKey6 <> "" And IsNumeric(codeKey6) Then
-            codeKey6 = CStr(CLng(codeKey6))
-            Dim catVal6 As String: catVal6 = Trim(CStr(wsAttr.Cells(r6, catCol5).Value))
-            If catVal6 <> "" And Not dictItemCategory.Exists(codeKey6) Then dictItemCategory.Add codeKey6, catVal6
+    If lastRow6 > HEADER_ROW6 Then
+        ' セルを1行ずつ読むと遅いため、範囲を配列に一括で読み込んでからループする
+        Dim attrArr6 As Variant
+        attrArr6 = wsAttr.Range(wsAttr.Cells(HEADER_ROW6 + 1, 1), wsAttr.Cells(lastRow6, 8)).Value
+        Dim r6 As Long
+        For r6 = 1 To UBound(attrArr6, 1)
+            Dim codeKey6 As String: codeKey6 = Trim(CStr(attrArr6(r6, 1)))
+            If codeKey6 <> "" And IsNumeric(codeKey6) Then
+                codeKey6 = CStr(CLng(codeKey6))
+                Dim catVal6 As String: catVal6 = Trim(CStr(attrArr6(r6, catCol5)))
+                If catVal6 <> "" And Not dictItemCategory.Exists(codeKey6) Then dictItemCategory.Add codeKey6, catVal6
 
-            Dim d6 As Double: d6 = Val(wsAttr.Cells(r6, 5).Value)
-            Dim w6 As Double: w6 = Val(wsAttr.Cells(r6, 6).Value)
-            Dim h6 As Double: h6 = Val(wsAttr.Cells(r6, 7).Value)
-            Dim wt6 As Double: wt6 = Val(wsAttr.Cells(r6, 8).Value)
+                Dim d6 As Double: d6 = Val(attrArr6(r6, 5))
+                Dim w6 As Double: w6 = Val(attrArr6(r6, 6))
+                Dim h6 As Double: h6 = Val(attrArr6(r6, 7))
+                Dim wt6 As Double: wt6 = Val(attrArr6(r6, 8))
 
-            If wt6 > 0 And Not dictItemWeightMaster.Exists(codeKey6) Then dictItemWeightMaster.Add codeKey6, wt6
-            If d6 > 0 And w6 > 0 And h6 > 0 And Not dictItemVolumeMaster.Exists(codeKey6) Then
-                dictItemVolumeMaster.Add codeKey6, d6 * w6 * h6
+                If wt6 > 0 And Not dictItemWeightMaster.Exists(codeKey6) Then dictItemWeightMaster.Add codeKey6, wt6
+                If d6 > 0 And w6 > 0 And h6 > 0 And Not dictItemVolumeMaster.Exists(codeKey6) Then
+                    dictItemVolumeMaster.Add codeKey6, d6 * w6 * h6
+                End If
             End If
-        End If
-    Next r6
+        Next r6
+    End If
     End If
 
     ' 予測データ自体の"カテゴリ"列(ブランド単位の分類など、大分類コードより判別的なもの)を優先的に上書き
@@ -1649,23 +1654,29 @@ Sub OverlayCategoryFromPredictionData(dictItemCategory As Object)
     Const HEADER_ROW7 As Long = 3
     Dim lastRow7 As Long: lastRow7 = wsPred.Cells(wsPred.Rows.Count, 1).End(xlUp).Row
     Dim lastCol7 As Long: lastCol7 = wsPred.Cells(HEADER_ROW7, wsPred.Columns.Count).End(xlToLeft).Column
+    If lastRow7 <= HEADER_ROW7 Then Exit Sub
 
+    Dim headerArr7 As Variant
+    headerArr7 = wsPred.Range(wsPred.Cells(HEADER_ROW7, 1), wsPred.Cells(HEADER_ROW7, lastCol7)).Value
     Dim codeColIdx7 As Long: codeColIdx7 = -1
     Dim catColIdx7 As Long: catColIdx7 = -1
     Dim hc7 As Long
     For hc7 = 1 To lastCol7
-        Dim hName7 As String: hName7 = Trim(CStr(wsPred.Cells(HEADER_ROW7, hc7).Value))
+        Dim hName7 As String: hName7 = Trim(CStr(headerArr7(1, hc7)))
         If hName7 = "品名コード" Then codeColIdx7 = hc7
         If hName7 = "カテゴリ" Then catColIdx7 = hc7
     Next hc7
     If codeColIdx7 = -1 Or catColIdx7 = -1 Then Exit Sub
 
+    ' セルを1行ずつ読むと遅いため、範囲を配列に一括で読み込んでからループする
+    Dim predArr7 As Variant
+    predArr7 = wsPred.Range(wsPred.Cells(HEADER_ROW7 + 1, 1), wsPred.Cells(lastRow7, lastCol7)).Value
     Dim r7 As Long
-    For r7 = HEADER_ROW7 + 1 To lastRow7
-        Dim codeKey7 As String: codeKey7 = Trim(CStr(wsPred.Cells(r7, codeColIdx7).Value))
+    For r7 = 1 To UBound(predArr7, 1)
+        Dim codeKey7 As String: codeKey7 = Trim(CStr(predArr7(r7, codeColIdx7)))
         If codeKey7 <> "" And IsNumeric(codeKey7) Then
             codeKey7 = CStr(CLng(codeKey7))
-            Dim catVal7 As String: catVal7 = Trim(CStr(wsPred.Cells(r7, catColIdx7).Value))
+            Dim catVal7 As String: catVal7 = Trim(CStr(predArr7(r7, catColIdx7)))
             If catVal7 <> "" Then
                 If dictItemCategory.Exists(codeKey7) Then
                     dictItemCategory(codeKey7) = catVal7
