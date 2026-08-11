@@ -1891,6 +1891,23 @@ End Sub
 ' 「在庫商品マスタを考慮する」チェックボックスが無ければ作成し、既存のものでもサイズ・位置・キャプションを
 ' 常に最新化する(古いバージョンで作られた、隣の表と重なるサイズのチェックボックスが残っていても直る)
 Sub EnsureAttrCheckBox(wsSet As Worksheet)
+    ' 過去バージョンで名前を付けずに作成した重複チェックボックスが残っていることがあるため、
+    ' 正しい名前(在庫商品マスタ考慮チェック)以外で「考慮する」を含むチェックボックスは削除してから作り直す
+    ' (Deleteしながら列挙すると取りこぼすことがあるため、対象名を先に集めてから別ループで削除する)
+    Dim namesToDelete As Collection: Set namesToDelete = New Collection
+    Dim cb As CheckBox
+    For Each cb In wsSet.CheckBoxes
+        If cb.Name <> "在庫商品マスタ考慮チェック" Then
+            If InStr(cb.Caption, "考慮する") > 0 Then namesToDelete.Add cb.Name
+        End If
+    Next cb
+    Dim delName As Variant
+    For Each delName In namesToDelete
+        On Error Resume Next
+        wsSet.CheckBoxes(CStr(delName)).Delete
+        On Error GoTo 0
+    Next delName
+
     Dim chkAttr As CheckBox
     On Error Resume Next
     Set chkAttr = wsSet.CheckBoxes("在庫商品マスタ考慮チェック")
