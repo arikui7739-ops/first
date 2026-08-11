@@ -15,7 +15,7 @@ Private g_CachedDictItemWeightMaster As Object
 Private g_CachedDictItemVolumeMaster As Object
 
 ' カテゴリー集中ペナルティで「サイズが近い」と判定する閾値(体積比lnの絶対値。0.4は1.5倍以内)
-Private Const SIZE_SIMILAR_RATIO As Double = 0.4
+Public Const SIZE_SIMILAR_RATIO As Double = 0.4
 
 Sub OptimizeABFormationFlow()
     Dim fd As Office.FileDialog
