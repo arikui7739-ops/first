@@ -1400,30 +1400,33 @@ Sub ImportItemAttributeMaster()
         Line Input #fileNo5, textLine5
         Dim cols5() As String: cols5 = Split(textLine5, ",")
         If UBound(cols5) >= 104 Then
-            Dim rawCode5 As String: rawCode5 = Trim(cols5(3)) ' 4列目:商品コード
+            ' 一部のCSV書き出しでは、コード列などが ="00150" のように=と引用符で囲まれる
+            ' (Excelが先頭ゼロを落とさないようにする書式)。そのままだとIsNumericが常にFalseに
+            ' なってしまうため、各列を読むたびにこの記法を検出して中身だけを取り出す
+            Dim rawCode5 As String: rawCode5 = StripCsvQuote5(Trim(cols5(3))) ' 4列目:商品コード
             If rawCode5 <> "" And IsNumeric(rawCode5) Then
                 Dim codeKey5 As String: codeKey5 = CStr(CLng(rawCode5))
-                Dim catL5 As String: catL5 = Trim(cols5(102)) ' 大分類コード
-                Dim catM5 As String: catM5 = Trim(cols5(103)) ' 中分類コード
-                Dim catS5 As String: catS5 = Trim(cols5(104)) ' 小分類コード
+                Dim catL5 As String: catL5 = StripCsvQuote5(Trim(cols5(102))) ' 大分類コード
+                Dim catM5 As String: catM5 = StripCsvQuote5(Trim(cols5(103))) ' 中分類コード
+                Dim catS5 As String: catS5 = StripCsvQuote5(Trim(cols5(104))) ' 小分類コード
 
                 ' 重量:実測梱重量(95列目)を優先、無ければ参考梱重量(83列目)を使う
                 ' (ラックの1ロケーションには通常梱単位で格納されるため、商品単位ではなく梱単位の寸法・重量を使う)
-                Dim wStr5 As String: wStr5 = Trim(cols5(94))
-                If Not (IsNumeric(wStr5) And CDbl(wStr5) > 0) Then wStr5 = Trim(cols5(82))
+                Dim wStr5 As String: wStr5 = StripCsvQuote5(Trim(cols5(94)))
+                If Not (IsNumeric(wStr5) And CDbl(wStr5) > 0) Then wStr5 = StripCsvQuote5(Trim(cols5(82)))
 
                 ' サイズ(縦横高):実測梱寸法(92～94列目)を優先、無ければ参考梱(80～82列目)を使う
                 Dim dStr5 As String, wdStr5 As String, hStr5 As String
-                dStr5 = Trim(cols5(91)): wdStr5 = Trim(cols5(92)): hStr5 = Trim(cols5(93))
+                dStr5 = StripCsvQuote5(Trim(cols5(91))): wdStr5 = StripCsvQuote5(Trim(cols5(92))): hStr5 = StripCsvQuote5(Trim(cols5(93)))
                 If Not (IsNumeric(dStr5) And IsNumeric(wdStr5) And IsNumeric(hStr5) And CDbl(dStr5) > 0 And CDbl(wdStr5) > 0) Then
-                    dStr5 = Trim(cols5(79)): wdStr5 = Trim(cols5(80)): hStr5 = Trim(cols5(81))
+                    dStr5 = StripCsvQuote5(Trim(cols5(79))): wdStr5 = StripCsvQuote5(Trim(cols5(80))): hStr5 = StripCsvQuote5(Trim(cols5(81)))
                 End If
 
                 ' 在庫数・発売期間(スコア計算には使わないが、参考情報としてシートに保存しておく)
-                Dim stockKon5 As String: stockKon5 = Trim(cols5(13))  ' 14列目:通常在庫(梱)
-                Dim stockBara5 As String: stockBara5 = Trim(cols5(14)) ' 15列目:通常在庫(バラ)
-                Dim saleFrom5 As String: saleFrom5 = Trim(cols5(24))  ' 25列目:発売開始年月日
-                Dim saleTo5 As String: saleTo5 = Trim(cols5(25))    ' 26列目:発売終了年月日
+                Dim stockKon5 As String: stockKon5 = StripCsvQuote5(Trim(cols5(13)))  ' 14列目:通常在庫(梱)
+                Dim stockBara5 As String: stockBara5 = StripCsvQuote5(Trim(cols5(14))) ' 15列目:通常在庫(バラ)
+                Dim saleFrom5 As String: saleFrom5 = StripCsvQuote5(Trim(cols5(24)))  ' 25列目:発売開始年月日
+                Dim saleTo5 As String: saleTo5 = StripCsvQuote5(Trim(cols5(25)))    ' 26列目:発売終了年月日
 
                 Dim rowArr5(1 To 12) As Variant
                 rowArr5(1) = codeKey5
@@ -1507,6 +1510,16 @@ Sub ImportItemAttributeMaster()
     MsgBox "「在庫商品マスタ」シートを更新しました。(" & outRows.Count & "件取込)" & vbCrLf & _
         "以降、AB編成動線最適化・ロケ変指示はこのシートのデータを使います(ファイル選択は不要です)。", vbInformation
 End Sub
+
+' ="00150" のようなExcel形式のCSVクォート(=と引用符で先頭ゼロなどを保護する書式)を検出し、
+' 該当すれば中身だけを取り出す。該当しない(通常の値)場合はそのまま返す
+Function StripCsvQuote5(ByVal s As String) As String
+    If Len(s) >= 3 And Left(s, 2) = "=" & Chr(34) And Right(s, 1) = Chr(34) Then
+        StripCsvQuote5 = Mid(s, 3, Len(s) - 3)
+    Else
+        StripCsvQuote5 = s
+    End If
+End Function
 
 ' 「在庫商品マスタ」シート(ImportItemAttributeMasterで取込済み)から、カテゴリー・重量・体積を読み込む。
 ' シートが無い場合、または「設定」シートのチェックボックス(L13)がオフの場合は何もしない(辞書は空のまま=
