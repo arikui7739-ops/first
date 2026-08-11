@@ -1895,8 +1895,9 @@ Sub EnsureExclusionSettingsSheet()
     Set wsSet = ThisWorkbook.Sheets("設定")
     On Error GoTo 0
     If Not wsSet Is Nothing Then
-        ' シート自体は既存でも、チェックボックスのサイズ・位置だけは毎回最新化する
-        ' (過去バージョンで作られた古いサイズのチェックボックスが残っていても、実行するたびに直る)
+        ' シート自体は既存でも、以下の2つは毎回最新化する(過去バージョンで作られたシートには
+        ' 属性考慮の設定行(K8～K11)自体が無いことがあり、その場合はここで追加で補完する)
+        Call EnsureAttrWeightSettings(wsSet)
         Call EnsureAttrCheckBox(wsSet)
         Exit Sub
     End If
@@ -1975,25 +1976,7 @@ Sub EnsureExclusionSettingsSheet()
     wsSet.Range("K7").Font.Bold = True
     wsSet.Range("L7").Value = 20 ' 「ロケ変指示」(予測データに基づく目標構成比への調整案)に出力する候補の最大件数。入替候補件数(L5)とは別の設定
 
-    wsSet.Range("K8").Value = "カテゴリー重み"
-    wsSet.Range("K8").Font.Bold = True
-    wsSet.Range("L8").Value = 0.005 ' 入替先号機の同カテゴリー品1件あたりの減点係数(在庫商品マスタ読込時のみ有効)
-
-    wsSet.Range("K9").Value = "サイズ重み"
-    wsSet.Range("K9").Font.Bold = True
-    wsSet.Range("L9").Value = 0.01 ' サイズ(体積)差1桁(対数比)あたりの減点係数
-
-    wsSet.Range("K10").Value = "重量重み"
-    wsSet.Range("K10").Font.Bold = True
-    wsSet.Range("L10").Value = 0.01 ' 重量差1桁(対数比)あたりの減点係数
-
-    wsSet.Range("K11").Value = "カテゴリー粒度"
-    wsSet.Range("K11").Font.Bold = True
-    wsSet.Range("L11").Value = "大分類" ' 在庫商品マスタのカテゴリー一致判定に使う粒度(大分類/中分類/小分類)
-    With wsSet.Range("L11").Validation
-        .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="大分類,中分類,小分類"
-    End With
+    Call EnsureAttrWeightSettings(wsSet)
 
     wsSet.Range("K12").Value = "在庫商品マスタ"
     wsSet.Range("K12").Font.Bold = True
@@ -2015,6 +1998,33 @@ Sub EnsureExclusionSettingsSheet()
     ' 例:1号機を1.8%にしたい場合はQ5=AB01(またはQ5=1)・R5=1.8のように行を追加する(未入力なら奇数偶数バランス優先のまま)
 
     Call EnsureAttrCheckBox(wsSet)
+End Sub
+
+' カテゴリー重み・サイズ重み・重量重み・カテゴリー粒度(K8:L11)が無ければ追加する
+' (既存の「設定」シートにはこれらの行自体が無いことがあるため、シートの有無に関わらず毎回呼び出して補完する。
+' 既に入力済みならユーザーの設定値を尊重し、上書きしない)
+Sub EnsureAttrWeightSettings(wsSet As Worksheet)
+    If Trim(CStr(wsSet.Range("K8").Value)) <> "" Then Exit Sub
+
+    wsSet.Range("K8").Value = "カテゴリー重み"
+    wsSet.Range("K8").Font.Bold = True
+    wsSet.Range("L8").Value = 0.005 ' 入替先号機の同カテゴリー品1件あたりの減点係数(在庫商品マスタ読込時のみ有効)
+
+    wsSet.Range("K9").Value = "サイズ重み"
+    wsSet.Range("K9").Font.Bold = True
+    wsSet.Range("L9").Value = 0.01 ' サイズ(体積)差1桁(対数比)あたりの減点係数
+
+    wsSet.Range("K10").Value = "重量重み"
+    wsSet.Range("K10").Font.Bold = True
+    wsSet.Range("L10").Value = 0.01 ' 重量差1桁(対数比)あたりの減点係数
+
+    wsSet.Range("K11").Value = "カテゴリー粒度"
+    wsSet.Range("K11").Font.Bold = True
+    wsSet.Range("L11").Value = "大分類" ' 在庫商品マスタのカテゴリー一致判定に使う粒度(大分類/中分類/小分類)
+    With wsSet.Range("L11").Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="大分類,中分類,小分類"
+    End With
 End Sub
 
 ' 「在庫商品マスタを考慮する」チェックボックスが無ければ作成し、既存のものでもサイズ・位置・キャプションを
