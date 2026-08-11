@@ -14,6 +14,9 @@ Private g_CachedDictItemCategory As Object
 Private g_CachedDictItemWeightMaster As Object
 Private g_CachedDictItemVolumeMaster As Object
 
+' カテゴリー集中ペナルティで「サイズが近い」と判定する閾値(体積比lnの絶対値。0.4は1.5倍以内)
+Private Const SIZE_SIMILAR_RATIO As Double = 0.4
+
 Sub OptimizeABFormationFlow()
     Dim fd As Office.FileDialog
     Dim filePath As String
@@ -30,7 +33,7 @@ Sub OptimizeABFormationFlow()
     Dim dictItemCat As Object: Set dictItemCat = CreateObject("Scripting.Dictionary") ' locKey→大分類コード
     Dim dictItemWt As Object: Set dictItemWt = CreateObject("Scripting.Dictionary") ' locKey→重量(kg)
     Dim dictItemVol As Object: Set dictItemVol = CreateObject("Scripting.Dictionary") ' locKey→体積(縦×横×高)
-    Dim dictMachCatCount As Object: Set dictMachCatCount = CreateObject("Scripting.Dictionary") ' "機番|大分類コード"→その機番内の同カテゴリー品数
+    Dim dictMachCatVol As Object: Set dictMachCatVol = CreateObject("Scripting.Dictionary") ' "機番|大分類コード"→その機番内の同カテゴリー品数
 
     Dim dictPairs As Object: Set dictPairs = CreateObject("Scripting.Dictionary") ' 同一ゾーン内アイテムペアの共起回数
     Dim dictCrossFace As Object: Set dictCrossFace = CreateObject("Scripting.Dictionary") ' そのペアが対面(異なる機番)かどうか
@@ -327,7 +330,18 @@ Sub OptimizeABFormationFlow()
     For Each catHitKey In dictItemHit.Keys
         If dictItemCat.Exists(catHitKey) Then
             Dim catTallyKey As String: catTallyKey = CStr(dictItemMach(catHitKey)) & "|" & dictItemCat(catHitKey)
-            dictMachCatCount(catTallyKey) = dictMachCatCount(catTallyKey) + 1
+            Dim colCatVol As Object
+            If dictMachCatVol.Exists(catTallyKey) Then
+                Set colCatVol = dictMachCatVol(catTallyKey)
+            Else
+                Set colCatVol = New Collection
+                dictMachCatVol.Add catTallyKey, colCatVol
+            End If
+            If dictItemVol.Exists(catHitKey) Then
+                colCatVol.Add dictItemVol(catHitKey)
+            Else
+                colCatVol.Add 0
+            End If
         End If
     Next catHitKey
     Dim oddTotalStart As Double, evenTotalStart As Double
@@ -466,7 +480,7 @@ Sub OptimizeABFormationFlow()
 
             ' パス1:目標構成比が入力されていれば、最も比率が不足している機番の候補をゾーン利用上限内で探す
             If hasTargetRatioData Then
-                targetItem = FindBestUnderTargetCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictItemMach, dictTargetRatio, machHitLive, targetedHitTotal, targetRatioSum, dictZoneUsedCount, True, MAX_PER_ZONE, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                targetItem = FindBestUnderTargetCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictItemMach, dictTargetRatio, machHitLive, targetedHitTotal, targetRatioSum, dictZoneUsedCount, True, MAX_PER_ZONE, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
             End If
             ' パス1':目標構成比が未入力なら、従来どおり希望サイド+ゾーン利用上限で探す
             If targetItem = "" And Not hasTargetRatioData Then
@@ -503,11 +517,11 @@ Sub OptimizeABFormationFlow()
             End If
             ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補(在庫商品マスタがあればその中で一番属性が近い候補)
             If targetItem = "" Then
-                targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, True, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, True, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
             End If
             ' パス3:制限なしで、最初に見つかった候補(最終手段。在庫商品マスタがあればその中で一番属性が近い候補)
             If targetItem = "" Then
-                targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, False, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, False, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
             End If
 
             If targetItem <> "" Then
@@ -752,7 +766,7 @@ Sub OptimizeABFormationFlow()
 
                     ' パス1:目標構成比が入力されていれば、最も比率が不足している機番の候補をゾーン利用上限内で探す
                     If hasTargetRatioData Then
-                        targetItemSM = FindBestUnderTargetCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictItemMach, dictTargetRatio, machHitLiveSM, targetedHitTotalSM, targetRatioSum, dictZoneUsedCountSM, True, MAX_PER_ZONE, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                        targetItemSM = FindBestUnderTargetCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictItemMach, dictTargetRatio, machHitLiveSM, targetedHitTotalSM, targetRatioSum, dictZoneUsedCountSM, True, MAX_PER_ZONE, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
                     End If
                     ' パス1':目標構成比が未入力なら、従来どおり希望サイド+ゾーン利用上限で探す
                     If targetItemSM = "" And Not hasTargetRatioData Then
@@ -789,11 +803,11 @@ Sub OptimizeABFormationFlow()
                     End If
                     ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補(在庫商品マスタがあればその中で一番属性が近い候補)
                     If targetItemSM = "" Then
-                        targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, True, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                        targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, True, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
                     End If
                     ' パス3:制限なしで、最初に見つかった候補(最終手段。在庫商品マスタがあればその中で一番属性が近い候補)
                     If targetItemSM = "" Then
-                        targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, False, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+                        targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, False, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
                     End If
 
                     If targetItemSM <> "" Then
@@ -1106,7 +1120,7 @@ End Sub
 ' 機番どうしの相対バランスとして機能する(Cバラ等AB以外への出荷分の影響も受けない)。
 ' respectZoneLimit=Trueならゾーン利用上限(maxPerZone)を満たすゾーンのみを対象にする。
 ' 該当候補が無ければ空文字を返す(呼び出し側でパス2以降にフォールバックする)
-Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictItemMach As Object, dictTargetRatio As Object, machHitLive() As Double, ByVal targetedHitTotal As Double, ByVal targetRatioSum As Double, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As String
+Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictItemMach As Object, dictTargetRatio As Object, machHitLive() As Double, ByVal targetedHitTotal As Double, ByVal targetRatioSum As Double, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatVol As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As String
     Dim bestDev As Double: bestDev = 2# ' 比率の差の理論上の最大値(-1～1)より大きい値で初期化
     Dim bestCand As String: bestCand = ""
 
@@ -1134,7 +1148,7 @@ Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer
                             ' 在庫商品マスタが読み込まれていれば、比率の差に「同カテゴリー集中度・サイズ差・重量差」の
                             ' ソフトなペナルティを加味する(未読込なら常に0で従来と同じ結果になる)
                             Dim combinedScore As Double
-                            combinedScore = dev + ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatCount, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
+                            combinedScore = dev + ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
                             If combinedScore < bestDev Then
                                 bestDev = combinedScore
                                 bestCand = candStr
@@ -1149,7 +1163,7 @@ Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer
 End Function
 
 ' 交換先候補の中から、条件を満たす最初の候補を返す(目標比率を考慮しない従来どおりのフォールバック探索)
-Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer, dictItemMach As Object, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As String
+Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer, dictItemMach As Object, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatVol As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As String
     ' 在庫商品マスタが読み込まれていなければ、従来どおり最初に見つかった候補をそのまま返す(挙動を変えない)
     Dim hasAttrData As Boolean: hasAttrData = (dictItemCat.Count > 0 Or dictItemVol.Count > 0 Or dictItemWt.Count > 0)
     Dim bestPenalty As Double: bestPenalty = -1
@@ -1178,7 +1192,7 @@ Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeI
                             Exit Function
                         End If
                         Dim candPenalty As Double
-                        candPenalty = ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatCount, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
+                        candPenalty = ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
                         If bestPenalty < 0 Or candPenalty < bestPenalty Then
                             bestPenalty = candPenalty
                             bestCand = candStr
@@ -1195,12 +1209,21 @@ End Function
 ' ①入替先候補が属する機番に、moverと同じ大分類コードの品が既にどれだけあるか(多いほど加点=同時ピッキング集中リスク)。
 ' ②候補とmoverのサイズ(体積)・重量の差(対数比。値が大きいほど物理的な入替えにくさが増す)。
 ' 在庫商品マスタが未読込(各dictが空)の品目は該当項目を単純にスキップする(0加点のまま)
-Function ComputeAttrPenalty(candStr As String, dictItemMach As Object, dictItemVol As Object, dictItemWt As Object, dictMachCatCount As Object, ByVal moverHasCat As Boolean, ByVal moverCat As String, ByVal moverHasWt As Boolean, ByVal moverWt As Double, ByVal moverHasVol As Boolean, ByVal moverVol As Double, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Double
+Function ComputeAttrPenalty(candStr As String, dictItemMach As Object, dictItemVol As Object, dictItemWt As Object, dictMachCatVol As Object, ByVal moverHasCat As Boolean, ByVal moverCat As String, ByVal moverHasWt As Boolean, ByVal moverWt As Double, ByVal moverHasVol As Boolean, ByVal moverVol As Double, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Double
     Dim penalty As Double: penalty = 0
     If moverHasCat Then
         Dim tallyKey As String: tallyKey = CStr(dictItemMach(candStr)) & "|" & moverCat
-        If dictMachCatCount.Exists(tallyKey) Then
-            penalty = penalty + catWeight * dictMachCatCount(tallyKey)
+        If dictMachCatVol.Exists(tallyKey) Then
+            Dim simCount As Long: simCount = 0
+            Dim volItem As Variant
+            For Each volItem In dictMachCatVol(tallyKey)
+                If moverHasVol And volItem > 0 And moverVol > 0 Then
+                    If Abs(Log(CDbl(volItem) / moverVol)) <= SIZE_SIMILAR_RATIO Then simCount = simCount + 1
+                Else
+                    simCount = simCount + 1
+                End If
+            Next volItem
+            penalty = penalty + catWeight * simCount
         End If
     End If
     If moverHasVol And dictItemVol.Exists(candStr) Then
@@ -1599,7 +1622,7 @@ Sub LoadItemAttributeMasterFromSheet(dictItemCategory As Object, dictItemWeightM
     On Error Resume Next
     Set wsAttr = ThisWorkbook.Sheets("在庫商品マスタ")
     On Error GoTo 0
-    If wsAttr Is Nothing Then Exit Sub
+    If Not wsAttr Is Nothing Then
 
     ' 「カテゴリー粒度」(L12)に応じて、大分類(B列)/中分類(C列)/小分類(D列)のどれを使うかを決める
     Dim catCol5 As Long: catCol5 = 2
@@ -1632,6 +1655,52 @@ Sub LoadItemAttributeMasterFromSheet(dictItemCategory As Object, dictItemWeightM
             End If
         End If
     Next r6
+    End If
+
+    ' 予測データ自体の"カテゴリ"列(ブランド単位の分類など、大分類コードより判別的なもの)を優先的に上書き
+    Call OverlayCategoryFromPredictionData(dictItemCategory)
+End Sub
+
+' 「予測データ」シート(Module8で取込済)に、品コードと同様の「カテゴリ(ブランド名)」列があれば上書き。
+' WF021L1の大分類コードは01/07/空白の2～3種類しかなく判別に使えないため、より実感に近い
+' ブランド名を優先的に同カテゴリーとして使う(存在する場合のみ置き換える)。
+' 「予測データ」シートまたは「カテゴリ」列が無い場合は何もしない
+Sub OverlayCategoryFromPredictionData(dictItemCategory As Object)
+    Dim wsPred As Worksheet
+    On Error Resume Next
+    Set wsPred = ThisWorkbook.Sheets("予測データ")
+    On Error GoTo 0
+    If wsPred Is Nothing Then Exit Sub
+
+    Const HEADER_ROW7 As Long = 3
+    Dim lastRow7 As Long: lastRow7 = wsPred.Cells(wsPred.Rows.Count, 1).End(xlUp).Row
+    Dim lastCol7 As Long: lastCol7 = wsPred.Cells(HEADER_ROW7, wsPred.Columns.Count).End(xlToLeft).Column
+
+    Dim codeColIdx7 As Long: codeColIdx7 = -1
+    Dim catColIdx7 As Long: catColIdx7 = -1
+    Dim hc7 As Long
+    For hc7 = 1 To lastCol7
+        Dim hName7 As String: hName7 = Trim(CStr(wsPred.Cells(HEADER_ROW7, hc7).Value))
+        If hName7 = "品名コード" Then codeColIdx7 = hc7
+        If hName7 = "カテゴリ" Then catColIdx7 = hc7
+    Next hc7
+    If codeColIdx7 = -1 Or catColIdx7 = -1 Then Exit Sub
+
+    Dim r7 As Long
+    For r7 = HEADER_ROW7 + 1 To lastRow7
+        Dim codeKey7 As String: codeKey7 = Trim(CStr(wsPred.Cells(r7, codeColIdx7).Value))
+        If codeKey7 <> "" And IsNumeric(codeKey7) Then
+            codeKey7 = CStr(CLng(codeKey7))
+            Dim catVal7 As String: catVal7 = Trim(CStr(wsPred.Cells(r7, catColIdx7).Value))
+            If catVal7 <> "" Then
+                If dictItemCategory.Exists(codeKey7) Then
+                    dictItemCategory(codeKey7) = catVal7
+                Else
+                    dictItemCategory.Add codeKey7, catVal7
+                End If
+            End If
+        End If
+    Next r7
 End Sub
 
 ' 「操作パネル」シートに在庫商品マスタ取込ボタンが無ければ追加する

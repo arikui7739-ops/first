@@ -104,7 +104,7 @@ Sub CreateRelocationPlan()
     Dim dictRowCat As Object: Set dictRowCat = CreateObject("Scripting.Dictionary") ' 行番号→大分類コード等(在庫商品マスタ)
     Dim dictRowWt As Object: Set dictRowWt = CreateObject("Scripting.Dictionary") ' 行番号→重量(kg)
     Dim dictRowVol As Object: Set dictRowVol = CreateObject("Scripting.Dictionary") ' 行番号→体積
-    Dim dictMachCatCount As Object: Set dictMachCatCount = CreateObject("Scripting.Dictionary") ' "機番|大分類コード"→その機番内の同カテゴリー品数
+    Dim dictMachCatVol As Object: Set dictMachCatVol = CreateObject("Scripting.Dictionary") ' "機番|大分類コード"→その機番内の同カテゴリー品数
 
     Dim r As Long
     For r = HEADER_ROW + 1 To lastRow
@@ -178,7 +178,18 @@ Sub CreateRelocationPlan()
         Dim rcKey As String: rcKey = CStr(rcI)
         If dictRowCat.Exists(rcKey) Then
             Dim rcTallyKey As String: rcTallyKey = CStr(rowMach(rcI)) & "|" & dictRowCat(rcKey)
-            dictMachCatCount(rcTallyKey) = dictMachCatCount(rcTallyKey) + 1
+            Dim colCatVolR As Object
+            If dictMachCatVol.Exists(rcTallyKey) Then
+                Set colCatVolR = dictMachCatVol(rcTallyKey)
+            Else
+                Set colCatVolR = New Collection
+                dictMachCatVol.Add rcTallyKey, colCatVolR
+            End If
+            If dictRowVol.Exists(rcKey) Then
+                colCatVolR.Add dictRowVol(rcKey)
+            Else
+                colCatVolR.Add 0
+            End If
         End If
     Next rcI
 
@@ -249,7 +260,7 @@ Sub CreateRelocationPlan()
         Dim srcRow As Long: srcRow = FindBestSourceRow(dictByMach(bestOverMach), rowUsed, rowCnt)
         Dim partnerRow As Long: partnerRow = 0
         Do While srcRow > 0 And partnerRow = 0
-            partnerRow = FindBestPartnerRow(dictByDan(CStr(rowDan(srcRow))), rowUsed, rowMach, CLng(bestOverMach), actualCountByMach, dictTargetRatio, targetRatioSum, targetedHitTotal, maxMachNum, srcRow, dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatCount, catWeight, sizeWeight, weightWeightCoef)
+            partnerRow = FindBestPartnerRow(dictByDan(CStr(rowDan(srcRow))), rowUsed, rowMach, CLng(bestOverMach), actualCountByMach, dictTargetRatio, targetRatioSum, targetedHitTotal, maxMachNum, srcRow, dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
             If partnerRow = 0 Then
                 Dim tmpUsedMark As Long: tmpUsedMark = srcRow
                 rowUsed(tmpUsedMark) = True ' この候補は今回使えないので一時的に使用済み扱いにして次を探す
@@ -379,7 +390,7 @@ End Function
 
 ' 同じ段の未使用ロケーションの中から、超過機番(excludeMach)以外で最も目標構成比を下回っている機番の
 ' ロケーションを1件返す(0=無し)。目標未設定の機番は対象外にする
-Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean, rowMach() As Long, ByVal excludeMach As Long, actualCountByMach As Object, dictTargetRatio As Object, ByVal targetRatioSum As Double, ByVal targetedHitTotal As Double, ByVal maxMachNum As Long, ByVal srcRow As Long, dictRowMach As Object, dictRowCat As Object, dictRowWt As Object, dictRowVol As Object, dictMachCatCount As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Long
+Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean, rowMach() As Long, ByVal excludeMach As Long, actualCountByMach As Object, dictTargetRatio As Object, ByVal targetRatioSum As Double, ByVal targetedHitTotal As Double, ByVal maxMachNum As Long, ByVal srcRow As Long, dictRowMach As Object, dictRowCat As Object, dictRowWt As Object, dictRowVol As Object, dictMachCatVol As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Long
     Dim bestRow As Long: bestRow = 0
     Dim bestScore As Double: bestScore = 0 ' 0未満(目標未達)のみを対象にするため、初期値0からより小さい値を探す
 
@@ -403,7 +414,7 @@ Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean,
                     ' 在庫商品マスタが読み込まれていれば、目標未達度に「同カテゴリー集中度・サイズ差・重量差」の
                     ' ソフトなペナルティを加味する(Module3のComputeAttrPenaltyを共用。未読込なら常に0で従来どおり)
                     Dim pScore As Double
-                    pScore = pDev + ComputeAttrPenalty(CStr(idx), dictRowMach, dictRowVol, dictRowWt, dictMachCatCount, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
+                    pScore = pDev + ComputeAttrPenalty(CStr(idx), dictRowMach, dictRowVol, dictRowWt, dictMachCatVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
                     If pScore < bestScore Then
                         bestScore = pScore
                         bestRow = idx
