@@ -178,17 +178,14 @@ Sub CreateRelocationPlan()
         Dim rcKey As String: rcKey = CStr(rcI)
         If dictRowCat.Exists(rcKey) Then
             Dim rcTallyKey As String: rcTallyKey = CStr(rowMach(rcI)) & "|" & dictRowCat(rcKey)
-            Dim colCatVolR As Object
-            If dictMachCatVol.Exists(rcTallyKey) Then
-                Set colCatVolR = dictMachCatVol(rcTallyKey)
+            dictMachCatVol(rcTallyKey) = dictMachCatVol(rcTallyKey) + 1
+            If dictRowVol.Exists(rcKey) And dictRowVol(rcKey) > 0 Then
+                Dim bIdxR As Long: bIdxR = Int(Log(dictRowVol(rcKey)) / SIZE_SIMILAR_RATIO)
+                Dim bKeyR As String: bKeyR = rcTallyKey & "|B" & bIdxR
+                dictMachCatVol(bKeyR) = dictMachCatVol(bKeyR) + 1
             Else
-                Set colCatVolR = New Collection
-                dictMachCatVol.Add rcTallyKey, colCatVolR
-            End If
-            If dictRowVol.Exists(rcKey) Then
-                colCatVolR.Add dictRowVol(rcKey)
-            Else
-                colCatVolR.Add 0
+                Dim nKeyR As String: nKeyR = rcTallyKey & "|N"
+                dictMachCatVol(nKeyR) = dictMachCatVol(nKeyR) + 1
             End If
         End If
     Next rcI

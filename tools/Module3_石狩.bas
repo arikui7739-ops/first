@@ -327,17 +327,14 @@ Sub OptimizeABFormationFlow()
     For Each catHitKey In dictItemHit.Keys
         If dictItemCat.Exists(catHitKey) Then
             Dim catTallyKey As String: catTallyKey = CStr(dictItemMach(catHitKey)) & "|" & dictItemCat(catHitKey)
-            Dim colCatVol As Object
-            If dictMachCatVol.Exists(catTallyKey) Then
-                Set colCatVol = dictMachCatVol(catTallyKey)
+            dictMachCatVol(catTallyKey) = dictMachCatVol(catTallyKey) + 1
+            If dictItemVol.Exists(catHitKey) And dictItemVol(catHitKey) > 0 Then
+                Dim bIdx As Long: bIdx = Int(Log(dictItemVol(catHitKey)) / SIZE_SIMILAR_RATIO)
+                Dim bKey As String: bKey = catTallyKey & "|B" & bIdx
+                dictMachCatVol(bKey) = dictMachCatVol(bKey) + 1
             Else
-                Set colCatVol = New Collection
-                dictMachCatVol.Add catTallyKey, colCatVol
-            End If
-            If dictItemVol.Exists(catHitKey) Then
-                colCatVol.Add dictItemVol(catHitKey)
-            Else
-                colCatVol.Add 0
+                Dim nKey As String: nKey = catTallyKey & "|N"
+                dictMachCatVol(nKey) = dictMachCatVol(nKey) + 1
             End If
         End If
     Next catHitKey
@@ -1188,14 +1185,18 @@ Function ComputeAttrPenalty(candStr As String, dictItemMach As Object, dictItemV
         Dim tallyKey As String: tallyKey = CStr(dictItemMach(candStr)) & "|" & moverCat
         If dictMachCatVol.Exists(tallyKey) Then
             Dim simCount As Long: simCount = 0
-            Dim volItem As Variant
-            For Each volItem In dictMachCatVol(tallyKey)
-                If moverHasVol And volItem > 0 And moverVol > 0 Then
-                    If Abs(Log(CDbl(volItem) / moverVol)) <= SIZE_SIMILAR_RATIO Then simCount = simCount + 1
-                Else
-                    simCount = simCount + 1
-                End If
-            Next volItem
+            If moverHasVol And moverVol > 0 Then
+                Dim nKey2 As String: nKey2 = tallyKey & "|N"
+                If dictMachCatVol.Exists(nKey2) Then simCount = simCount + dictMachCatVol(nKey2)
+                Dim mb As Long: mb = Int(Log(moverVol) / SIZE_SIMILAR_RATIO)
+                Dim bi As Long
+                For bi = mb - 1 To mb + 1
+                    Dim bKey2 As String: bKey2 = tallyKey & "|B" & bi
+                    If dictMachCatVol.Exists(bKey2) Then simCount = simCount + dictMachCatVol(bKey2)
+                Next bi
+            Else
+                simCount = dictMachCatVol(tallyKey)
+            End If
             penalty = penalty + catWeight * simCount
         End If
     End If
