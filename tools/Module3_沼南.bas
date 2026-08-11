@@ -2063,6 +2063,10 @@ Sub EnsureAttrCheckBox(wsSet As Worksheet)
         chkAttr.Height = 18
     End If
     chkAttr.Caption = "考慮する"
+
+    ' リンクセル(L12)はTRUE/FALSEの値そのものは保持しつつ、チェックボックスの陰から文字が
+    ' はみ出て見えないよう、文字色を白にして見た目上は非表示にする(NumberFormatではTRUE/FALSEを隠せないため)
+    wsSet.Range("L12").Font.Color = RGB(255, 255, 255)
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外号機・除外品コードの辞書と除外ロケーションの配列、シート名・件数・号機範囲設定を組み立てる
