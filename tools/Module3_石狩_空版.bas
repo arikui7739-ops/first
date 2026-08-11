@@ -1689,7 +1689,12 @@ Sub EnsureExclusionSettingsSheet()
     On Error Resume Next
     Set wsSet = ThisWorkbook.Sheets("設定")
     On Error GoTo 0
-    If Not wsSet Is Nothing Then Exit Sub
+    If Not wsSet Is Nothing Then
+        ' シート自体は既存でも、チェックボックスのサイズ・位置だけは毎回最新化する
+        ' (過去バージョンで作られた古いサイズのチェックボックスが残っていても、実行するたびに直る)
+        Call EnsureAttrCheckBox(wsSet)
+        Exit Sub
+    End If
 
     Set wsSet = ThisWorkbook.Sheets.Add
     wsSet.Name = "設定"
@@ -1792,11 +1797,6 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("K13").Value = "商品属性マスタ"
     wsSet.Range("K13").Font.Bold = True
-    Dim chkAttr As CheckBox
-    Set chkAttr = wsSet.CheckBoxes.Add(wsSet.Range("L13").Left, wsSet.Range("L13").Top - 2, 190, 18)
-    chkAttr.Caption = "考慮する(入替候補選定に反映)"
-    chkAttr.LinkedCell = "$L$13"
-    chkAttr.Value = xlOn ' オフにすると、商品属性マスタのファイル選択ダイアログ自体を出さずスキップする
 
     wsSet.Range("N3").Value = "■機番別目標構成比"
     wsSet.Range("N3").Font.Bold = True
@@ -1813,6 +1813,29 @@ Sub EnsureExclusionSettingsSheet()
         wsSet.Cells(5 + dti, 14).Value = defaultTargetLabels(dti)
         wsSet.Cells(5 + dti, 15).Value = defaultTargetValues(dti)
     Next dti
+
+    Call EnsureAttrCheckBox(wsSet)
+End Sub
+
+' 「商品属性マスタを考慮する」チェックボックスが無ければ作成し、既存のものでもサイズ・位置・キャプションを
+' 常に最新化する(古いバージョンで作られた、隣の表と重なるサイズのチェックボックスが残っていても直る)
+Sub EnsureAttrCheckBox(wsSet As Worksheet)
+    Dim chkAttr As CheckBox
+    On Error Resume Next
+    Set chkAttr = wsSet.CheckBoxes("商品属性マスタ考慮チェック")
+    On Error GoTo 0
+    If chkAttr Is Nothing Then
+        Set chkAttr = wsSet.CheckBoxes.Add(wsSet.Range("L13").Left, wsSet.Range("L13").Top - 2, 110, 18)
+        chkAttr.Name = "商品属性マスタ考慮チェック"
+        chkAttr.LinkedCell = "$L$13"
+        chkAttr.Value = xlOn ' オフにすると、商品属性マスタのファイル選択ダイアログ自体を出さずスキップする
+    Else
+        chkAttr.Left = wsSet.Range("L13").Left
+        chkAttr.Top = wsSet.Range("L13").Top - 2
+        chkAttr.Width = 110
+        chkAttr.Height = 18
+    End If
+    chkAttr.Caption = "考慮する"
 End Sub
 
 ' 「設定」シートの内容を読み込み、除外機番・除外品コードの辞書と除外ロケーションの配列、シート名・件数・機番範囲設定を組み立てる
