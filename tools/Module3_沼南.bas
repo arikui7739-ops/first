@@ -1438,18 +1438,25 @@ Sub ImportItemAttributeMaster()
                 Dim catM5 As String: catM5 = Trim(cols5(103)) ' 中分類コード
                 Dim catS5 As String: catS5 = Trim(cols5(104)) ' 小分類コード
 
-                ' 重量:実測(87列目)を優先、無ければ参考(71列目)を使う
-                Dim wStr5 As String: wStr5 = Trim(cols5(86))
-                If Not (IsNumeric(wStr5) And CDbl(wStr5) > 0) Then wStr5 = Trim(cols5(70))
+                ' 重量:実測梱重量(95列目)を優先、無ければ参考梱重量(83列目)を使う
+                ' (ラックの1ロケーションには通常梱単位で格納されるため、商品単位ではなく梱単位の寸法・重量を使う)
+                Dim wStr5 As String: wStr5 = Trim(cols5(94))
+                If Not (IsNumeric(wStr5) And CDbl(wStr5) > 0) Then wStr5 = Trim(cols5(82))
 
-                ' サイズ(縦横高):実測(84～86列目)を優先、無ければ参考(68～70列目)を使う
+                ' サイズ(縦横高):実測梱寸法(92～94列目)を優先、無ければ参考梱(80～82列目)を使う
                 Dim dStr5 As String, wdStr5 As String, hStr5 As String
-                dStr5 = Trim(cols5(83)): wdStr5 = Trim(cols5(84)): hStr5 = Trim(cols5(85))
+                dStr5 = Trim(cols5(91)): wdStr5 = Trim(cols5(92)): hStr5 = Trim(cols5(93))
                 If Not (IsNumeric(dStr5) And IsNumeric(wdStr5) And IsNumeric(hStr5) And CDbl(dStr5) > 0 And CDbl(wdStr5) > 0) Then
-                    dStr5 = Trim(cols5(67)): wdStr5 = Trim(cols5(68)): hStr5 = Trim(cols5(69))
+                    dStr5 = Trim(cols5(79)): wdStr5 = Trim(cols5(80)): hStr5 = Trim(cols5(81))
                 End If
 
-                Dim rowArr5(1 To 8) As Variant
+                ' 在庫数・発売期間(スコア計算には使わないが、参考情報としてシートに保存しておく)
+                Dim stockKon5 As String: stockKon5 = Trim(cols5(13))  ' 14列目:通常在庫(梱)
+                Dim stockBara5 As String: stockBara5 = Trim(cols5(14)) ' 15列目:通常在庫(バラ)
+                Dim saleFrom5 As String: saleFrom5 = Trim(cols5(24))  ' 25列目:発売開始年月日
+                Dim saleTo5 As String: saleTo5 = Trim(cols5(25))    ' 26列目:発売終了年月日
+
+                Dim rowArr5(1 To 12) As Variant
                 rowArr5(1) = codeKey5
                 rowArr5(2) = catL5
                 rowArr5(3) = catM5
@@ -1458,6 +1465,10 @@ Sub ImportItemAttributeMaster()
                 rowArr5(6) = IIf(IsNumeric(wdStr5), CDbl(wdStr5), 0)
                 rowArr5(7) = IIf(IsNumeric(hStr5), CDbl(hStr5), 0)
                 rowArr5(8) = IIf(IsNumeric(wStr5), CDbl(wStr5), 0)
+                rowArr5(9) = IIf(IsNumeric(stockKon5), CDbl(stockKon5), 0)
+                rowArr5(10) = IIf(IsNumeric(stockBara5), CDbl(stockBara5), 0)
+                rowArr5(11) = saleFrom5
+                rowArr5(12) = saleTo5
                 outRows.Add rowArr5
             End If
         End If
@@ -1489,8 +1500,9 @@ Sub ImportItemAttributeMaster()
     wsAttr.Name = "在庫商品マスタ"
 
     wsAttr.Columns("A:A").NumberFormat = "@" ' 品コードは先頭ゼロ落ち防止のため文字列扱いにする
+    wsAttr.Columns("K:L").NumberFormat = "@" ' 発売開始・終了年月日(YYYYMMDD)は日付誤変換防止のため文字列扱いにする
 
-    wsAttr.Range("A1:H1").Merge
+    wsAttr.Range("A1:L1").Merge
     wsAttr.Range("A1").Value = "【在庫商品マスタ取込】ファイル: " & Dir(filePath5) & _
         "　／　ファイル更新日時: " & Format(fileDate5, "yyyy/mm/dd hh:mm") & _
         "　／　取込日時: " & Format(Now, "yyyy/mm/dd hh:mm")
@@ -1498,25 +1510,25 @@ Sub ImportItemAttributeMaster()
     wsAttr.Range("A1").HorizontalAlignment = xlLeft
 
     Const HEADER_ROW5 As Long = 3
-    wsAttr.Range("A3:H3").Value = Array("品コード", "大分類コード", "中分類コード", "小分類コード", "縦", "横", "高", "重量(kg)")
-    wsAttr.Range("A3:H3").Interior.Color = RGB(220, 230, 255)
-    wsAttr.Range("A3:H3").Font.Bold = True
+    wsAttr.Range("A3:L3").Value = Array("品コード", "大分類コード", "中分類コード", "小分類コード", "梱-縦", "梱-横", "梱-高", "梱-重量(kg)", "通常在庫(梱)", "通常在庫(バラ)", "発売開始年月日", "発売終了年月日")
+    wsAttr.Range("A3:L3").Interior.Color = RGB(220, 230, 255)
+    wsAttr.Range("A3:L3").Font.Bold = True
 
     Dim outArr5() As Variant
-    ReDim outArr5(1 To outRows.Count, 1 To 8)
+    ReDim outArr5(1 To outRows.Count, 1 To 12)
     Dim ri5 As Long: ri5 = 0
     Dim rv5 As Variant
     For Each rv5 In outRows
         ri5 = ri5 + 1
         Dim c5 As Long
-        For c5 = 1 To 8
+        For c5 = 1 To 12
             outArr5(ri5, c5) = rv5(c5)
         Next c5
     Next rv5
-    wsAttr.Range(wsAttr.Cells(HEADER_ROW5 + 1, 1), wsAttr.Cells(HEADER_ROW5 + outRows.Count, 8)).Value = outArr5
+    wsAttr.Range(wsAttr.Cells(HEADER_ROW5 + 1, 1), wsAttr.Cells(HEADER_ROW5 + outRows.Count, 12)).Value = outArr5
 
-    wsAttr.Range("A3:H3").AutoFilter
-    wsAttr.Columns("A:H").AutoFit
+    wsAttr.Range("A3:L3").AutoFilter
+    wsAttr.Columns("A:L").AutoFit
     wsAttr.Rows(1).RowHeight = 20
 
     Application.Calculation = xlCalculationAutomatic
