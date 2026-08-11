@@ -259,7 +259,8 @@ Sub CreateRelocationPlan()
         Dim srcRow As Long: srcRow = FindBestSourceRow(dictByMach(bestOverMach), rowUsed, rowCnt)
         Dim partnerRow As Long: partnerRow = 0
         Dim innerRetryCounter As Long: innerRetryCounter = 0
-        Do While srcRow > 0 And partnerRow = 0
+        Const INNER_RETRY_CAP As Long = 30 ' 1‹@”Ô‚ ‚½‚è‚ÌŒó•â’Tõ‚ð‘Å‚¿Ø‚éãŒÀ(‘å‚«‚¢‹@”Ô‚Å‚à”•ª‘Ò‚½‚³‚ê‚È‚¢‚æ‚¤‚É‚·‚é)
+        Do While srcRow > 0 And partnerRow = 0 And innerRetryCounter < INNER_RETRY_CAP
             innerRetryCounter = innerRetryCounter + 1
             If innerRetryCounter Mod 20 = 0 Then DoEvents
             partnerRow = FindBestPartnerRow(dictByDan(CStr(rowDan(srcRow))), rowUsed, rowMach, CLng(bestOverMach), actualCountByMach, dictTargetRatio, targetRatioSum, targetedHitTotal, abBlockFrom, abBlockTo, abBlockCount, srcRow, dictRowMach, dictRowCat, dictRowWt, dictRowVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
