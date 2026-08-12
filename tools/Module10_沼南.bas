@@ -468,3 +468,402 @@ Sub EnsureRelocationPlanButton()
     ' ボタンが下に伸び続けないよう、2列に並び替える(Module3の共通処理)
     Call LayoutPanelButtons
 End Sub
+
+' ----------------------------------------------------
+' AB(1～46号機)・Cバラ(51～68号機)・X拡張(70号機以上)の3ゾーン間で、
+' 出荷回数の順位に応じたゾーン間入替候補を作成する。
+' 出荷回数は「日別ロケーション実績」の月曜列(実績)を優先し、無ければ
+' 「予測データ」の「投入回数_曜日平均」で代用する。
+' 各ゾーンの容量は実際にある間口数(該当ロケーション数)をそのまま使い、
+' 出荷回数の多い順にAB→C→Xの優先度で「あるべきゾーン」を決める。
+' 段(棚の高さ)はAB/C/Xで形状が異なる別ゾーンのため考慮せず、順位のズレ
+' だけでペアを作る。除外設定(除外号機・除外ロケーション・除外品コード)は
+' ロケ変指示と共通のものを使う。
+' ----------------------------------------------------
+Sub CreateZoneRebalancePlan()
+    Call EnsureZoneRebalanceButton
+
+    Dim wsPred As Worksheet
+    On Error Resume Next
+    Set wsPred = ThisWorkbook.Sheets("予測データ")
+    On Error GoTo 0
+    If wsPred Is Nothing Then
+        MsgBox "「予測データ」シートが見つかりません。先に「予測データを取り込む」を実行してください。", vbExclamation
+        Exit Sub
+    End If
+
+    Call EnsureExclusionSettingsSheet
+
+    Dim dictExcludedMach As Object: Set dictExcludedMach = CreateObject("Scripting.Dictionary")
+    Dim locMach() As Long, locDanFrom() As Long, locDanTo() As Long, locColFrom() As Long, locColTo() As Long
+    Dim locCount As Long
+    Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary")
+    Dim ratioSheetName As String, maxSwapRows As Long, abSlotCount As Long
+    Dim abBlockFrom() As Long, abBlockTo() As Long, abBlockCount As Long
+    Dim dictTargetRatio As Object: Set dictTargetRatio = CreateObject("Scripting.Dictionary")
+    Dim catWeight As Double: catWeight = 0.005
+    Dim sizeWeight As Double: sizeWeight = 0.01
+    Dim weightWeightCoef As Double: weightWeightCoef = 0.01
+    Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount, dictTargetRatio, catWeight, sizeWeight, weightWeightCoef)
+
+    Const ZONE_AB_MAX As Long = 46
+    Const ZONE_C_MIN As Long = 51
+    Const ZONE_C_MAX As Long = 68
+    Const ZONE_X_MIN As Long = 70
+    Const TARGET_AB As Double = 0.92
+    Const TARGET_C As Double = 0.07
+    Const TARGET_X As Double = 0.01
+
+    Const HEADER_ROW As Long = 3
+    Dim lastRow As Long: lastRow = wsPred.Cells(wsPred.Rows.Count, 1).End(xlUp).Row
+    Dim lastCol As Long: lastCol = wsPred.Cells(HEADER_ROW, wsPred.Columns.Count).End(xlToLeft).Column
+    If lastRow <= HEADER_ROW Then
+        MsgBox "「予測データ」シートにデータ行がありません。", vbExclamation
+        Exit Sub
+    End If
+
+    Dim headerArr As Variant
+    headerArr = wsPred.Range(wsPred.Cells(HEADER_ROW, 1), wsPred.Cells(HEADER_ROW, lastCol)).Value
+    Dim machColIdx As Long: machColIdx = -1
+    Dim danColIdx As Long: danColIdx = -1
+    Dim colColIdx As Long: colColIdx = -1
+    Dim itemCodeColIdx As Long: itemCodeColIdx = -1
+    Dim itemNameColIdx As Long: itemNameColIdx = -1
+    Dim wdAvgColIdx As Long: wdAvgColIdx = -1
+    Dim hc As Long
+    For hc = 1 To lastCol
+        Dim hName As String: hName = Trim(CStr(headerArr(1, hc)))
+        If hName = "号機" Then machColIdx = hc
+        If hName = "段" Then danColIdx = hc
+        If hName = "列" Then colColIdx = hc
+        If hName = "品名コード" Then itemCodeColIdx = hc
+        If hName = "品名" Then itemNameColIdx = hc
+        If hName = "投入回数_曜日平均" Then wdAvgColIdx = hc
+    Next hc
+    If machColIdx = -1 Or danColIdx = -1 Or colColIdx = -1 Or itemCodeColIdx = -1 Then
+        MsgBox "「予測データ」シートに「号機」「段」「列」「品名コード」のいずれかの列が見つかりません。", vbExclamation
+        Exit Sub
+    End If
+
+    ' 「日別ロケーション実績」の月曜列があれば、ロケーションごとの月曜実績を読み込む
+    Dim dictMondayActual As Object: Set dictMondayActual = CreateObject("Scripting.Dictionary")
+    Dim hasMondayCol As Boolean: hasMondayCol = False
+    Dim wsHist As Worksheet
+    On Error Resume Next
+    Set wsHist = ThisWorkbook.Sheets("日別ロケーション実績")
+    On Error GoTo 0
+    If Not wsHist Is Nothing Then
+        Const HIST_DATE_COL_FIRST As Long = 7
+        Const HIST_DATE_COL_LAST As Long = 16
+        Dim mondayCol As Long: mondayCol = -1
+        Dim hdc As Long
+        For hdc = HIST_DATE_COL_FIRST To HIST_DATE_COL_LAST
+            If InStr(CStr(wsHist.Cells(1, hdc).Value), "(月)") > 0 Then mondayCol = hdc
+        Next hdc
+        If mondayCol > 0 Then
+            hasMondayCol = True
+            Dim histLastRow As Long: histLastRow = wsHist.Cells(wsHist.Rows.Count, 1).End(xlUp).Row
+            If histLastRow >= 2 Then
+                Dim histArr As Variant
+                histArr = wsHist.Range(wsHist.Cells(2, 4), wsHist.Cells(histLastRow, mondayCol)).Value
+                Dim mondayRelCol As Long: mondayRelCol = mondayCol - 4 + 1
+                Dim hr As Long
+                For hr = 1 To UBound(histArr, 1)
+                    Dim hLocKey As Variant: hLocKey = histArr(hr, 1)
+                    If IsNumeric(hLocKey) Then
+                        Dim hVal As Double: hVal = 0
+                        Dim hMondayVal As Variant: hMondayVal = histArr(hr, mondayRelCol)
+                        If IsNumeric(hMondayVal) Then hVal = CDbl(hMondayVal)
+                        dictMondayActual(CStr(CLng(hLocKey))) = hVal
+                    End If
+                Next hr
+            End If
+        End If
+    End If
+
+    ' 対象ロケーション(AB・Cバラ・X拡張のいずれか、除外条件を除く)を配列にまとめる
+    Dim dataArr As Variant
+    dataArr = wsPred.Range(wsPred.Cells(HEADER_ROW + 1, 1), wsPred.Cells(lastRow, lastCol)).Value
+    Dim n As Long: n = UBound(dataArr, 1)
+
+    Dim rMach() As Long, rDan() As Long, rCol() As Long
+    Dim rCode() As String, rName() As String, rCnt() As Double, rZone() As String
+    ReDim rMach(1 To n)
+    ReDim rDan(1 To n)
+    ReDim rCol(1 To n)
+    ReDim rCode(1 To n)
+    ReDim rName(1 To n)
+    ReDim rCnt(1 To n)
+    ReDim rZone(1 To n)
+    Dim m As Long: m = 0
+
+    Dim i As Long
+    For i = 1 To n
+        If IsNumeric(dataArr(i, machColIdx)) And IsNumeric(dataArr(i, danColIdx)) And IsNumeric(dataArr(i, colColIdx)) Then
+            Dim mach As Long: mach = CLng(dataArr(i, machColIdx))
+            Dim zone As String: zone = ""
+            If mach >= 1 And mach <= ZONE_AB_MAX Then
+                zone = "AB"
+            ElseIf mach >= ZONE_C_MIN And mach <= ZONE_C_MAX Then
+                zone = "C"
+            ElseIf mach >= ZONE_X_MIN Then
+                zone = "X"
+            End If
+            If zone <> "" Then
+                If Not IsExcludedSlot3(dictExcludedMach, CInt(mach)) Then
+                    Dim dan As Long: dan = CLng(dataArr(i, danColIdx))
+                    Dim colv As Long: colv = CLng(dataArr(i, colColIdx))
+                    If Not IsExcludedLocation(CInt(mach), CInt(dan), CInt(colv), locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount) Then
+                        Dim itemCodeStr As String: itemCodeStr = Trim(CStr(dataArr(i, itemCodeColIdx)))
+                        Dim isItemExcluded As Boolean: isItemExcluded = False
+                        If itemCodeStr <> "" And dictExcludedItemCode.Count > 0 Then
+                            isItemExcluded = dictExcludedItemCode.Exists(itemCodeStr)
+                            If Not isItemExcluded And IsNumeric(itemCodeStr) Then isItemExcluded = dictExcludedItemCode.Exists(CStr(CLng(itemCodeStr)))
+                        End If
+                        If Not isItemExcluded Then
+                            Dim cntVal As Double: cntVal = 0
+                            Dim locKeyStr As String: locKeyStr = CStr(mach * 10000& + dan * 100& + colv)
+                            If hasMondayCol And dictMondayActual.Exists(locKeyStr) Then
+                                cntVal = dictMondayActual(locKeyStr)
+                            ElseIf wdAvgColIdx > 0 Then
+                                cntVal = Val(dataArr(i, wdAvgColIdx))
+                            End If
+
+                            m = m + 1
+                            rMach(m) = mach
+                            rDan(m) = dan
+                            rCol(m) = colv
+                            rCode(m) = itemCodeStr
+                            rName(m) = IIf(itemNameColIdx > 0, Trim(CStr(dataArr(i, itemNameColIdx))), "")
+                            rCnt(m) = cntVal
+                            rZone(m) = zone
+                        End If
+                    End If
+                End If
+            End If
+        End If
+    Next i
+
+    If m = 0 Then
+        MsgBox "AB・Cバラ・X拡張のいずれかの範囲に該当するロケーションが見つかりませんでした。", vbExclamation
+        Exit Sub
+    End If
+
+    ' 出荷回数の多い順に並べる(QuickSort、降順)
+    Dim idx() As Long: ReDim idx(1 To m)
+    Dim ii As Long
+    For ii = 1 To m
+        idx(ii) = ii
+    Next ii
+    Call QuickSortIdxByCntDesc(idx, rCnt, 1, m)
+
+    ' 各ゾーンの実際の間口数(該当ロケーション数)を容量として、出荷回数の多い順に
+    ' AB→C→Xの優先度で「あるべきゾーン」を割り当てる
+    Dim capAB As Long: capAB = 0
+    Dim capC As Long: capC = 0
+    Dim capX As Long: capX = 0
+    For ii = 1 To m
+        Select Case rZone(ii)
+            Case "AB": capAB = capAB + 1
+            Case "C": capC = capC + 1
+            Case "X": capX = capX + 1
+        End Select
+    Next ii
+
+    Dim idealZone() As String: ReDim idealZone(1 To m)
+    Dim rank As Long
+    For rank = 1 To m
+        Dim origIdx As Long: origIdx = idx(rank)
+        If rank <= capAB Then
+            idealZone(origIdx) = "AB"
+        ElseIf rank <= capAB + capC Then
+            idealZone(origIdx) = "C"
+        Else
+            idealZone(origIdx) = "X"
+        End If
+    Next rank
+
+    ' 現在のゾーンと、あるべきゾーンがズレている商品を、ズレの向きごとに集める
+    ' (順位順=出荷回数の多い順に集まるので、影響の大きいズレから優先的にペアになる)
+    Dim colC2AB As Collection: Set colC2AB = New Collection
+    Dim colAB2C As Collection: Set colAB2C = New Collection
+    Dim colX2AB As Collection: Set colX2AB = New Collection
+    Dim colAB2X As Collection: Set colAB2X = New Collection
+    Dim colX2C As Collection: Set colX2C = New Collection
+    Dim colC2X As Collection: Set colC2X = New Collection
+    For rank = 1 To m
+        Dim oi As Long: oi = idx(rank)
+        If idealZone(oi) <> rZone(oi) Then
+            Dim dirKey As String: dirKey = rZone(oi) & ">" & idealZone(oi)
+            Select Case dirKey
+                Case "C>AB": colC2AB.Add oi
+                Case "AB>C": colAB2C.Add oi
+                Case "X>AB": colX2AB.Add oi
+                Case "AB>X": colAB2X.Add oi
+                Case "X>C": colX2C.Add oi
+                Case "C>X": colC2X.Add oi
+            End Select
+        End If
+    Next rank
+
+    Dim outRows As Collection: Set outRows = New Collection
+    Call AppendZonePairs(outRows, colC2AB, colAB2C, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
+    Call AppendZonePairs(outRows, colX2AB, colAB2X, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
+    Call AppendZonePairs(outRows, colX2C, colC2X, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
+
+    If outRows.Count = 0 Then
+        MsgBox "現状ですでにゾーン間の入替候補はありませんでした(出荷回数順の理想配置と一致しています)。", vbInformation
+        Exit Sub
+    End If
+
+    On Error Resume Next
+    ThisWorkbook.Sheets("ゾーン間入替候補").Delete
+    On Error GoTo 0
+
+    Dim wsOut As Worksheet
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If Not wsPanel Is Nothing Then
+        Set wsOut = ThisWorkbook.Sheets.Add(Before:=wsPanel)
+    Else
+        Set wsOut = Sheets.Add
+    End If
+    wsOut.Name = "ゾーン間入替候補"
+
+    ' 現状・目標・施策後見込みのゾーン別構成比をまとめて先頭に表示する
+    Dim sumAB As Double, sumC As Double, sumX As Double, sumAll As Double
+    For ii = 1 To m
+        Select Case rZone(ii)
+            Case "AB": sumAB = sumAB + rCnt(ii)
+            Case "C": sumC = sumC + rCnt(ii)
+            Case "X": sumX = sumX + rCnt(ii)
+        End Select
+    Next ii
+    sumAll = sumAB + sumC + sumX
+
+    Dim idealAB As Double, idealC As Double, idealX As Double
+    For ii = 1 To m
+        Select Case idealZone(ii)
+            Case "AB": idealAB = idealAB + rCnt(ii)
+            Case "C": idealC = idealC + rCnt(ii)
+            Case "X": idealX = idealX + rCnt(ii)
+        End Select
+    Next ii
+
+    wsOut.Range("A1").Value = "ゾーン"
+    wsOut.Range("B1").Value = "現状構成比"
+    wsOut.Range("C1").Value = "目標構成比"
+    wsOut.Range("D1").Value = "施策後見込み構成比"
+    wsOut.Range("A2").Value = "AB(1～46号機)"
+    wsOut.Range("A3").Value = "Cバラ(51～68号機)"
+    wsOut.Range("A4").Value = "X拡張(70号機以上)"
+    If sumAll > 0 Then
+        wsOut.Range("B2").Value = sumAB / sumAll
+        wsOut.Range("B3").Value = sumC / sumAll
+        wsOut.Range("B4").Value = sumX / sumAll
+        wsOut.Range("D2").Value = idealAB / sumAll
+        wsOut.Range("D3").Value = idealC / sumAll
+        wsOut.Range("D4").Value = idealX / sumAll
+    End If
+    wsOut.Range("C2").Value = TARGET_AB
+    wsOut.Range("C3").Value = TARGET_C
+    wsOut.Range("C4").Value = TARGET_X
+    wsOut.Range("B2:D4").NumberFormat = "0.0%"
+    wsOut.Range("A1:D1").Font.Bold = True
+    wsOut.Range("A1:D4").Columns.AutoFit
+    If Not hasMondayCol Then
+        wsOut.Range("A5").Value = "※月曜実績が無いため、予測データの曜日平均で代用しています"
+    End If
+
+    Const TABLE_HEADER_ROW As Long = 7
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Value = Array("品名(移動元)", "品コード(移動元)", "ロケーション(移動元)", "出荷回数(移動元)", "⇒", "品名(移動先)", "品コード(移動先)", "ロケーション(移動先)", "出荷回数(移動先)", "ゾーン変化")
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Font.Bold = True
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Interior.Color = RGB(220, 230, 255)
+
+    Dim outR As Long: outR = TABLE_HEADER_ROW
+    Dim rv As Variant
+    For Each rv In outRows
+        outR = outR + 1
+        wsOut.Cells(outR, 1).Value = rv(5)
+        wsOut.Cells(outR, 2).Value = rv(4)
+        wsOut.Cells(outR, 3).Value = rv(1) & "-" & Format(rv(2), "00") & "-" & Format(rv(3), "00")
+        wsOut.Cells(outR, 4).Value = rv(6)
+        wsOut.Cells(outR, 5).Value = "⇒"
+        wsOut.Cells(outR, 6).Value = rv(12)
+        wsOut.Cells(outR, 7).Value = rv(11)
+        wsOut.Cells(outR, 8).Value = rv(8) & "-" & Format(rv(9), "00") & "-" & Format(rv(10), "00")
+        wsOut.Cells(outR, 9).Value = rv(13)
+        wsOut.Cells(outR, 10).Value = rv(0) & "→" & rv(7) & " / " & rv(7) & "→" & rv(0)
+    Next rv
+
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(outR, 10)).Columns.AutoFit
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).AutoFilter
+
+    MsgBox "「ゾーン間入替候補」シートを作成しました。(" & outRows.Count & "件)", vbInformation
+End Sub
+
+' idx()を、rCnt()の値が大きい順(降順)に並べ替える(QuickSort)
+Private Sub QuickSortIdxByCntDesc(idx() As Long, rCnt() As Double, ByVal lo As Long, ByVal hi As Long)
+    If lo >= hi Then Exit Sub
+    Dim pivot As Double: pivot = rCnt(idx((lo + hi) \ 2))
+    Dim i As Long: i = lo
+    Dim j As Long: j = hi
+    Do While i <= j
+        Do While rCnt(idx(i)) > pivot
+            i = i + 1
+        Loop
+        Do While rCnt(idx(j)) < pivot
+            j = j - 1
+        Loop
+        If i <= j Then
+            Dim tmp As Long: tmp = idx(i)
+            idx(i) = idx(j)
+            idx(j) = tmp
+            i = i + 1
+            j = j - 1
+        End If
+    Loop
+    If lo < j Then Call QuickSortIdxByCntDesc(idx, rCnt, lo, j)
+    If i < hi Then Call QuickSortIdxByCntDesc(idx, rCnt, i, hi)
+End Sub
+
+' 「本来こちらへ移りたい」候補(colInto)と「本来あちらへ移りたい」候補(colOutOf)を
+' 先頭(出荷回数が多い方)から順にペアにしてswapリスト(outRows)に追加する
+' (件数が多い方の余りは、対になる相手が無いため今回は対象外とする)
+Private Sub AppendZonePairs(outRows As Collection, colInto As Collection, colOutOf As Collection, rMach() As Long, rDan() As Long, rCol() As Long, rCode() As String, rName() As String, rCnt() As Double, rZone() As String)
+    Dim n As Long: n = colInto.Count
+    If colOutOf.Count < n Then n = colOutOf.Count
+    Dim k As Long
+    For k = 1 To n
+        Dim iA As Long: iA = colInto(k)
+        Dim iB As Long: iB = colOutOf(k)
+        outRows.Add Array(rZone(iA), rMach(iA), rDan(iA), rCol(iA), rCode(iA), rName(iA), rCnt(iA), rZone(iB), rMach(iB), rDan(iB), rCol(iB), rCode(iB), rName(iB), rCnt(iB))
+    Next k
+End Sub
+
+' 「操作パネル」シートにゾーン間入替候補作成ボタンが無ければ追加する
+Sub EnsureZoneRebalanceButton()
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If wsPanel Is Nothing Then Exit Sub
+
+    Dim existing As Shape
+    On Error Resume Next
+    Set existing = wsPanel.Shapes("ゾーン間入替候補ボタン")
+    On Error GoTo 0
+    If existing Is Nothing Then
+        Dim btn As Button
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B24").Left, wsPanel.Range("B24").Top, 220, 36)
+        btn.Name = "ゾーン間入替候補ボタン"
+        btn.OnAction = "CreateZoneRebalancePlan"
+        btn.Characters.Text = "ゾーン間入替候補作成"
+        btn.Font.Size = 12
+        btn.Font.Bold = True
+    End If
+
+    Call LayoutPanelButtons
+End Sub

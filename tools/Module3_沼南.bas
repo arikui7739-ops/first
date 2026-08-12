@@ -1850,6 +1850,7 @@ Sub EnsureOperationPanelSheet()
     Call EnsureItemAttributeImportButton
     Call EnsureRatioChartButtons
     Call EnsureRelocationPlanButton
+    Call EnsureZoneRebalanceButton
 
     ' ボタンが下に伸び続けないよう、既存のボタンをすべて2列に並び替える
     ' (Module8・Module9・Module10のEnsure系Subからも毎回呼び出される)
@@ -1873,7 +1874,7 @@ Sub LayoutPanelButtons()
     Dim baseTop As Double: baseTop = wsPanel.Range("H4").Top
 
     Dim orderNames As Variant
-    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "在庫商品マスタ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン")
+    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "在庫商品マスタ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン", "ゾーン間入替候補ボタン")
 
     Dim idx As Long, placedCount As Long: placedCount = 0
     For idx = LBound(orderNames) To UBound(orderNames)

@@ -1803,7 +1803,7 @@ Sub LayoutPanelButtons()
     Dim baseTop As Double: baseTop = wsPanel.Range("B20").Top
 
     Dim orderNames As Variant
-    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "在庫商品マスタ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン")
+    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "在庫商品マスタ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン", "ゾーン間入替候補ボタン")
 
     Dim idx As Long, placedCount As Long: placedCount = 0
     For idx = LBound(orderNames) To UBound(orderNames)
