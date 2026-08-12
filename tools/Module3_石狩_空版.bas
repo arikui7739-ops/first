@@ -1856,7 +1856,9 @@ Sub EnsureOperationPanelSheet()
     Call EnsureItemAttributeImportButton
     Call EnsureRatioChartButtons
     Call EnsureRelocationPlanButton
+    Call EnsureZoneRebalanceButton
     Call EnsureSwapCorrelationButton
+    Call EnsureSortSheetsButton
 
     ' ボタンが下に伸び続けないよう、既存のボタンをすべて2列に並び替える
     ' (Module1・Module8・Module9・Module10のEnsure系Subからも毎回呼び出される)
