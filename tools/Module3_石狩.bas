@@ -1760,26 +1760,38 @@ Sub EnsureOperationPanelSheet()
         wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
         wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
-        wsPanel.Range("B4:H18").Merge
+        wsPanel.Range("B4:H26").Merge
         wsPanel.Range("B4").Value = _
-            "このマクロは、ピッキング実績ログを解析して、AB(自動倉庫ラック)内で同一号機・同一ゾーン(対面)で" & _
-            "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案するツールです。" & _
+            "このワークブックには、AB(自動倉庫ラック)編成の動線最適化に関するマクロが入っています。" & _
+            "AB対面分散(Module3):ピッキング実績ログを解析して、AB内で同一号機・同一ゾーン(対面)で" & _
+            "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案します。" & _
             "同時ピッキングの集中を緩和し、機番間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
-            "【使い方】" & vbCrLf & _
+            "【使い方(AB対面分散)】" & vbCrLf & _
             "①下の「AB対面分散を実行」ボタンを押す" & vbCrLf & _
             "②品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
             "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
             "④「AB対面分散」「同号機分散」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
+            "【他にもあるマクロ】" & vbCrLf & _
+            "「予測データ取込」(WMS等のCSVを取り込む)・「在庫データ取込」(在庫状況ダウンロード・WF021L1形式、任意)・" & _
+            "「予測グラフ」「実績グラフ」(機番別構成比グラフ、実績側は「日別実績」も更新)・「号機間バランス」" & _
+            "(予測データを機番別目標構成比に近づけるロケーション入替指示、同じ段の中でのみ入替え)・「ゾーンバランス」" & _
+            "(予測データ・「日別実績」を元に、出荷回数順にAB(1～46号機)・Cバラ(51～68号機)・X拡張(70号機以上)の" & _
+            "3ゾーン間で入替候補を作成、段は問わない)・「シート並び替え」(シートタブの並び順を整える)の各ボタンも" & _
+            "用意されていますが、初回はまだボタンが表示されていない場合があります。その場合はAlt+F8のマクロ一覧から、" & _
+            "対応するマクロ(ImportPredictionData・ImportItemAttributeMaster・CreateForecastRatioChart・" & _
+            "CreateActualRatioChart・CreateRelocationPlan・CreateZoneRebalancePlan・SortKnownSheets)を" & _
+            "一度実行すると、以降はボタンとして表示されます。" & vbCrLf & vbCrLf & _
             "【カスタマイズ】" & vbCrLf & _
             "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番・AB間口数・機番別目標構成比などは「設定」シートで変更できます" & _
-            "(シートが無ければ実行時に自動作成されます)。機番別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
+            "(シートが無ければ実行時に自動作成されます)。機番別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します" & _
+            "(ゾーンバランスは除外設定のみ共有し、機番別目標構成比は使いません)。"
         wsPanel.Range("B4").Font.Size = 11
         wsPanel.Range("B4").WrapText = True
         wsPanel.Range("B4").VerticalAlignment = xlTop
-        wsPanel.Rows("4:18").RowHeight = 18
+        wsPanel.Rows("4:26").RowHeight = 18
 
         Dim btn As Button
-        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B28").Left, wsPanel.Range("B28").Top, 220, 36)
         btn.Name = "AB対面分散ボタン"
         btn.OnAction = "OptimizeABFormationFlow"
         btn.Characters.Text = "AB対面分散を実行"
@@ -1810,8 +1822,8 @@ Sub LayoutPanelButtons()
     Const BTN_HEIGHT As Double = 36
     Const GAP_X As Double = 20
     Const GAP_Y As Double = 16
-    Dim baseLeft As Double: baseLeft = wsPanel.Range("B20").Left
-    Dim baseTop As Double: baseTop = wsPanel.Range("B20").Top
+    Dim baseLeft As Double: baseLeft = wsPanel.Range("B28").Left
+    Dim baseTop As Double: baseTop = wsPanel.Range("B28").Top
 
     Dim orderNames As Variant
     orderNames = Array("AB対面分散ボタン", "予測データ取込ボタン", "在庫データ取込ボタン", "予測グラフボタン", "実績グラフボタン", "号機間バランスボタン", "ゾーンバランスボタン", "シート並び替えボタン")
