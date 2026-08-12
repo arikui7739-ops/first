@@ -686,6 +686,11 @@ End Sub
 ' 列の並び順は読み込んだ順ではなく、実際の日付の新旧で決める(古い日付ほど左)。
 ' シートは「予測データ」の現在の内容で毎回作り直すが、既存の実績は品名コード単位で
 ' 退避して引き継ぐため、商品が入れ替わっても過去実績が失われることはない
+Function FormatHistoryDateHeader(ByVal d As Date) As String
+    Dim wdNames As Variant: wdNames = Array("日", "月", "火", "水", "木", "金", "土")
+    FormatHistoryDateHeader = Format(d, "m/d") & "(" & wdNames(Weekday(d) - 1) & ")"
+End Function
+
 Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDate As Date)
     Dim wsData As Worksheet
     On Error Resume Next
