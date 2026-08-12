@@ -775,6 +775,10 @@ Sub CreateZoneRebalancePlan()
     End If
 
     Const TABLE_HEADER_ROW As Long = 7
+    wsOut.Range("B7:B100000").NumberFormat = "@"
+    wsOut.Range("C7:C100000").NumberFormat = "@"
+    wsOut.Range("G7:G100000").NumberFormat = "@"
+    wsOut.Range("H7:H100000").NumberFormat = "@"
     wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Value = Array("品名(移動元)", "品コード(移動元)", "ロケーション(移動元)", "出荷回数(移動元)", "⇒", "品名(移動先)", "品コード(移動先)", "ロケーション(移動先)", "出荷回数(移動先)", "ゾーン変化")
     wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Font.Bold = True
     wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Interior.Color = RGB(220, 230, 255)
