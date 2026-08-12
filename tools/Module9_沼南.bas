@@ -591,7 +591,8 @@ Sub BuildSortedHistoryDates(ByVal wsOldOut As Worksheet, ByVal keyColIdx As Long
     Dim existingDates As Object: Set existingDates = CreateObject("Scripting.Dictionary")
 
     If Not wsOldOut Is Nothing Then
-        Dim oldColDate(dateColFirst To dateColLast) As Variant
+        Dim oldColDate() As Variant
+        ReDim oldColDate(dateColFirst To dateColLast)
         Dim dc As Long
         For dc = dateColFirst To dateColLast
             Dim parsedDate As Variant: parsedDate = ParseHistoryDateHeader(wsOldOut.Cells(1, dc).Value)
