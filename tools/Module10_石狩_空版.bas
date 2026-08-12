@@ -473,8 +473,9 @@ End Sub
 ' ----------------------------------------------------
 ' AB(1～46号機)・Cバラ(51～68号機)・X拡張(70号機以上)の3ゾーン間で、
 ' 出荷回数の順位に応じたゾーンバランスを作成する。
-' 出荷回数は「日別実績」の月曜列(実績)を優先し、無ければ
-' 「予測データ」の「投入回数_曜日平均」で代用する。
+' 出荷回数は「品名実績」(品名コード単位で蓄積した実績。商品が移動しても実績は
+' その商品についてくる)の月曜列を優先し、無ければ「予測データ」の
+' 「投入回数_曜日平均」で代用する。
 ' 各ゾーンの容量は実際にある間口数(該当ロケーション数)をそのまま使い、
 ' 出荷回数の多い順にAB→C→Xの優先度で「あるべきゾーン」を決める。
 ' 段(棚の高さ)はAB/C/Xで形状が異なる別ゾーンのため考慮せず、順位のズレ
@@ -545,12 +546,15 @@ Sub CreateZoneRebalancePlan()
         Exit Sub
     End If
 
-    ' 「日別実績」の月曜列があれば、ロケーションごとの月曜実績を読み込む
+    ' 「品名実績」の月曜列があれば、品名コードごとの月曜実績を読み込む
+    ' (S71実績はロケーション単位でしか記録されないため、「日別実績」はロケーション基準で
+    ' 商品が移動すると過去実績が古い商品のまま残ってしまう。「品名実績」は品名コード単位で
+    ' 実績を蓄積しているため、商品が移動していても正しくその商品の実績を参照できる)
     Dim dictMondayActual As Object: Set dictMondayActual = CreateObject("Scripting.Dictionary")
     Dim hasMondayCol As Boolean: hasMondayCol = False
     Dim wsHist As Worksheet
     On Error Resume Next
-    Set wsHist = ThisWorkbook.Sheets("日別実績")
+    Set wsHist = ThisWorkbook.Sheets("品名実績")
     On Error GoTo 0
     If Not wsHist Is Nothing Then
         Const HIST_DATE_COL_FIRST As Long = 7
@@ -565,16 +569,15 @@ Sub CreateZoneRebalancePlan()
             Dim histLastRow As Long: histLastRow = wsHist.Cells(wsHist.Rows.Count, 1).End(xlUp).Row
             If histLastRow >= 2 Then
                 Dim histArr As Variant
-                histArr = wsHist.Range(wsHist.Cells(2, 4), wsHist.Cells(histLastRow, mondayCol)).Value
-                Dim mondayRelCol As Long: mondayRelCol = mondayCol - 4 + 1
+                histArr = wsHist.Range(wsHist.Cells(2, 1), wsHist.Cells(histLastRow, mondayCol)).Value
                 Dim hr As Long
                 For hr = 1 To UBound(histArr, 1)
-                    Dim hLocKey As Variant: hLocKey = histArr(hr, 1)
-                    If IsNumeric(hLocKey) Then
+                    Dim hItemKey As String: hItemKey = Trim(CStr(histArr(hr, 1)))
+                    If hItemKey <> "" Then
                         Dim hVal As Double: hVal = 0
-                        Dim hMondayVal As Variant: hMondayVal = histArr(hr, mondayRelCol)
+                        Dim hMondayVal As Variant: hMondayVal = histArr(hr, mondayCol)
                         If IsNumeric(hMondayVal) Then hVal = CDbl(hMondayVal)
-                        dictMondayActual(CStr(CLng(hLocKey))) = hVal
+                        dictMondayActual(hItemKey) = hVal
                     End If
                 Next hr
             End If
@@ -622,9 +625,8 @@ Sub CreateZoneRebalancePlan()
                         End If
                         If Not isItemExcluded Then
                             Dim cntVal As Double: cntVal = 0
-                            Dim locKeyStr As String: locKeyStr = CStr(mach * 10000& + dan * 100& + colv)
-                            If hasMondayCol And dictMondayActual.Exists(locKeyStr) Then
-                                cntVal = dictMondayActual(locKeyStr)
+                            If hasMondayCol And dictMondayActual.Exists(itemCodeStr) Then
+                                cntVal = dictMondayActual(itemCodeStr)
                             ElseIf wdAvgColIdx > 0 Then
                                 cntVal = Val(dataArr(i, wdAvgColIdx))
                             End If
@@ -774,7 +776,7 @@ Sub CreateZoneRebalancePlan()
     wsOut.Range("A1:D1").Font.Bold = True
     wsOut.Range("A1:D4").Columns.AutoFit
     If Not hasMondayCol Then
-        wsOut.Range("A5").Value = "※月曜実績が無いため、予測データの曜日平均で代用しています"
+        wsOut.Range("A5").Value = "※品名実績の月曜実績が無いため、予測データの曜日平均で代用しています"
     End If
 
     Const TABLE_HEADER_ROW As Long = 7

@@ -163,6 +163,7 @@ Sub CreateActualRatioChart()
 
     If businessDate = DateSerial(1900, 1, 1) Then businessDate = Date ' B行から日付が読み取れなければ実行日を使う
     Call UpdateDailyLocationHistory(dictLocationHits, businessDate)
+    Call UpdateDailyItemHistory(dictLocationHits, businessDate)
 
     Application.Calculation = xlCalculationAutomatic
     Application.EnableEvents = True
@@ -619,3 +620,196 @@ Private Function FormatHistoryDateHeader(ByVal d As Date) As String
     Dim wdNames As Variant: wdNames = Array("日", "月", "火", "水", "木", "金", "土")
     FormatHistoryDateHeader = Format(d, "m/d") & "(" & wdNames(Weekday(d) - 1) & ")"
 End Function
+
+' 「品名実績」シートを更新する(「予測データ」の号機-段-列→品名コード対応を使い、
+' その日のロケーション別S71実績を品名コード単位で合算する。同じ品名コードが
+' 複数ロケーションにまたがっていれば合計する)。
+' S71実績はロケーション単位でしか記録されないため、「日別実績」はロケーションに
+' 実績が紐づき、商品が移動すると過去実績はそのロケーションに残ってしまう。
+' このシートは品名コードを単位に実績を蓄積するため、商品が別のロケーションへ
+' 移動しても実績はその商品についてくる(移動先の実績にすり替わらない)。
+' ただし「予測データ」に無いロケーションのS71実績(品名不明分)は品名コードに
+' 割り当てられないため、このシートの合計には含まれない(「日別実績」の合計とは
+' 一致しないことがある)。
+' シートは「予測データ」の現在の内容で毎回作り直すが、既存の実績は品名コード単位で
+' 退避して引き継ぐため、商品が入れ替わっても過去実績が失われることはない
+Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDate As Date)
+    Dim wsData As Worksheet
+    On Error Resume Next
+    Set wsData = ThisWorkbook.Sheets("予測データ")
+    On Error GoTo 0
+    If wsData Is Nothing Then Exit Sub
+
+    Const HEADER_ROW As Long = 3
+    Dim lastRow As Long: lastRow = wsData.Cells(wsData.Rows.Count, 1).End(xlUp).Row
+    Dim lastCol As Long: lastCol = wsData.Cells(HEADER_ROW, wsData.Columns.Count).End(xlToLeft).Column
+
+    Dim machColIdx As Long: machColIdx = -1
+    Dim danColIdx As Long: danColIdx = -1
+    Dim colColIdx As Long: colColIdx = -1
+    Dim itemCodeColIdx As Long: itemCodeColIdx = -1
+    Dim itemNameColIdx As Long: itemNameColIdx = -1
+    Dim locClassColIdx As Long: locClassColIdx = -1
+    Dim forecastColIdx As Long: forecastColIdx = -1
+    Dim hc As Long
+    For hc = 1 To lastCol
+        Dim hName As String: hName = Trim(CStr(wsData.Cells(HEADER_ROW, hc).Value))
+        If hName = "号機" Then machColIdx = hc
+        If hName = "段" Then danColIdx = hc
+        If hName = "列" Then colColIdx = hc
+        If hName = "品名コード" Then itemCodeColIdx = hc
+        If hName = "品名" Then itemNameColIdx = hc
+        If hName = "ロケ分類" Then locClassColIdx = hc
+        If hName = "投入回数_予測" Then forecastColIdx = hc
+    Next hc
+    If machColIdx = -1 Or danColIdx = -1 Or colColIdx = -1 Or itemCodeColIdx = -1 Then Exit Sub
+
+    Const DATE_COL_FIRST As Long = 7  ' G列
+    Const DATE_COL_LAST As Long = 16  ' P列(最大10列)
+    Const TOTAL_COL As Long = 17      ' Q列(実績の総計)
+    Dim histSheetName As String: histSheetName = "品名実績"
+
+    ' 既存シートがあれば、日付見出しと実績(品名コード→値)を退避しておく
+    Dim wsOut As Worksheet
+    On Error Resume Next
+    Set wsOut = ThisWorkbook.Sheets(histSheetName)
+    On Error GoTo 0
+
+    Dim newHeader As String: newHeader = FormatHistoryDateHeader(businessDate)
+    Dim dateHeaders(DATE_COL_FIRST To DATE_COL_LAST) As String
+    Dim dictOldHistory As Object: Set dictOldHistory = CreateObject("Scripting.Dictionary") ' 品名コード→10列分の実績配列
+    Dim existingDateCount As Long: existingDateCount = 0
+    Dim overwriteColIdx As Long: overwriteColIdx = -1
+
+    If Not wsOut Is Nothing Then
+        Dim dc As Long
+        For dc = DATE_COL_FIRST To DATE_COL_LAST
+            Dim hv As String: hv = Trim(CStr(wsOut.Cells(1, dc).Value))
+            dateHeaders(dc) = hv
+            If hv <> "" Then
+                existingDateCount = existingDateCount + 1
+                If hv = newHeader Then overwriteColIdx = dc
+            End If
+        Next dc
+
+        Dim lastOutRow As Long: lastOutRow = wsOut.Cells(wsOut.Rows.Count, 1).End(xlUp).Row
+        If lastOutRow >= 2 Then
+            Dim orow As Long
+            For orow = 2 To lastOutRow
+                Dim oItemKey As String: oItemKey = Trim(CStr(wsOut.Cells(orow, 1).Value))
+                If oItemKey <> "" And Not dictOldHistory.Exists(oItemKey) Then
+                    Dim vals(DATE_COL_FIRST To DATE_COL_LAST) As Variant
+                    For dc = DATE_COL_FIRST To DATE_COL_LAST
+                        vals(dc) = wsOut.Cells(orow, dc).Value
+                    Next dc
+                    dictOldHistory.Add oItemKey, vals
+                End If
+            Next orow
+        End If
+    End If
+
+    ' 今回の日付を書き込む列を決める(同じ日付があれば上書き、無ければ次の空き列。
+    ' 10列すべて埋まっていれば1列分左にシフトしてP列を空ける)
+    Dim targetColIdx As Long
+    If overwriteColIdx > 0 Then
+        targetColIdx = overwriteColIdx
+    ElseIf existingDateCount < (DATE_COL_LAST - DATE_COL_FIRST + 1) Then
+        targetColIdx = DATE_COL_FIRST + existingDateCount
+    Else
+        Dim shiftCol As Long
+        For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
+            dateHeaders(shiftCol) = dateHeaders(shiftCol + 1)
+        Next shiftCol
+        dateHeaders(DATE_COL_LAST) = ""
+
+        Dim shiftKey As Variant
+        For Each shiftKey In dictOldHistory.Keys
+            Dim shiftVals As Variant: shiftVals = dictOldHistory(shiftKey)
+            For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
+                shiftVals(shiftCol) = shiftVals(shiftCol + 1)
+            Next shiftCol
+            shiftVals(DATE_COL_LAST) = Empty
+            dictOldHistory(shiftKey) = shiftVals
+        Next shiftKey
+
+        targetColIdx = DATE_COL_LAST
+    End If
+    dateHeaders(targetColIdx) = newHeader
+
+    ' 「予測データ」の現在の号機-段-列→品名コード対応で、今日のロケーション別実績を
+    ' 品名コード単位に合算する(同じ品名コードが複数ロケーションにあれば合計する)
+    Dim dictItemHitsToday As Object: Set dictItemHitsToday = CreateObject("Scripting.Dictionary")
+    Dim dictItemLocCount As Object: Set dictItemLocCount = CreateObject("Scripting.Dictionary")
+    Dim dictItemForecastSum As Object: Set dictItemForecastSum = CreateObject("Scripting.Dictionary")
+    Dim dictItemName As Object: Set dictItemName = CreateObject("Scripting.Dictionary")
+    Dim dictItemLocClass As Object: Set dictItemLocClass = CreateObject("Scripting.Dictionary")
+
+    Dim r As Long
+    For r = HEADER_ROW + 1 To lastRow
+        If IsNumeric(wsData.Cells(r, machColIdx).Value) And IsNumeric(wsData.Cells(r, danColIdx).Value) And IsNumeric(wsData.Cells(r, colColIdx).Value) Then
+            Dim mach As Long: mach = CLng(wsData.Cells(r, machColIdx).Value)
+            Dim dan As Long: dan = CLng(wsData.Cells(r, danColIdx).Value)
+            Dim colv As Long: colv = CLng(wsData.Cells(r, colColIdx).Value)
+            Dim itemCode As String: itemCode = Trim(CStr(wsData.Cells(r, itemCodeColIdx).Value))
+            If itemCode <> "" Then
+                Dim eLocKey As String: eLocKey = Format(mach, "00") & Format(dan, "00") & Format(colv, "00")
+                Dim hitVal As Double: hitVal = 0
+                If dictLocationHits.Exists(eLocKey) Then hitVal = dictLocationHits(eLocKey)
+
+                If Not dictItemHitsToday.Exists(itemCode) Then
+                    dictItemHitsToday.Add itemCode, 0
+                    dictItemLocCount.Add itemCode, 0
+                    dictItemForecastSum.Add itemCode, 0
+                    dictItemName.Add itemCode, IIf(itemNameColIdx > 0, Trim(CStr(wsData.Cells(r, itemNameColIdx).Value)), "")
+                    dictItemLocClass.Add itemCode, IIf(locClassColIdx > 0, Trim(CStr(wsData.Cells(r, locClassColIdx).Value)), "")
+                End If
+                dictItemHitsToday(itemCode) = dictItemHitsToday(itemCode) + hitVal
+                dictItemLocCount(itemCode) = dictItemLocCount(itemCode) + 1
+                dictItemForecastSum(itemCode) = dictItemForecastSum(itemCode) + IIf(forecastColIdx > 0, Val(wsData.Cells(r, forecastColIdx).Value), 0)
+            End If
+        End If
+    Next r
+
+    ' シートを作り直す
+    On Error Resume Next
+    ThisWorkbook.Sheets(histSheetName).Delete
+    On Error GoTo 0
+
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If Not wsPanel Is Nothing Then
+        Set wsOut = ThisWorkbook.Sheets.Add(Before:=wsPanel)
+    Else
+        Set wsOut = Sheets.Add
+    End If
+    wsOut.Name = histSheetName
+
+    wsOut.Columns("A:A").NumberFormat = "@" ' コード(先頭ゼロ落ち防止)
+
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 6)).Value = Array("コード", "品名", "ロケ分類", "号機数", "予測回数", "")
+    For dc = DATE_COL_FIRST To DATE_COL_LAST
+        wsOut.Cells(1, dc).Value = dateHeaders(dc)
+    Next dc
+    wsOut.Cells(1, TOTAL_COL).Value = "総計"
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Font.Bold = True
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Interior.Color = RGB(220, 230, 255)
+
+    Dim outRow As Long: outRow = 1
+    Dim itemKeyV As Variant
+    For Each itemKeyV In dictItemHitsToday.Keys
+        Dim ik As String: ik = CStr(itemKeyV)
+        outRow = outRow + 1
+        wsOut.Cells(outRow, 1).Value = ik
+        wsOut.Cells(outRow, 2).Value = dictItemName(ik)
+        wsOut.Cells(outRow, 3).Value = dictItemLocClass(ik)
+        wsOut.Cells(outRow, 4).Value = dictItemLocCount(ik)
+        wsOut.Cells(outRow, 5).Value = dictItemForecastSum(ik)
+
+        Call WriteDailyValues(wsOut, outRow, ik, ik, dictItemHitsToday, dictOldHistory, targetColIdx, DATE_COL_FIRST, DATE_COL_LAST, TOTAL_COL)
+    Next itemKeyV
+
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(outRow, TOTAL_COL)).Columns.AutoFit
+    wsOut.Range("A1").AutoFilter
+End Sub
