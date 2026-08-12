@@ -52,6 +52,11 @@ Sub SwapLocationsByCorrelationFast_Fix()
             End If
         Next cf
     End If
+    If wsCF Is Nothing Then
+        ' CFシートが無い場合(空版で「予測データ」に置き換わっている運用)は、
+        ' 予測データシート(号機・段・列・品名コード・品名)から代用する
+        Call LoadLocNameCodeFromPredictionData(dictLocName, dictLocCode)
+    End If
 
     ' 1. ファイル選択(複数選択可・全ファイル形式)
     Set fd = Application.FileDialog(msoFileDialogFilePicker)
@@ -394,6 +399,64 @@ Function GetLocCode(dictLocCode As Object, ByVal mach As Long, locKey As String)
         GetLocCode = ""
     End If
 End Function
+
+' CFシートが無い場合、「予測データ」シート(Module8で取込済)の号機・段・列・品名コード・品名から
+' ロケーション⇔品名・品コードの対応表を代わりに作る(見つからない場合は何もしない)
+Sub LoadLocNameCodeFromPredictionData(dictLocName As Object, dictLocCode As Object)
+    Dim wsPred As Worksheet
+    On Error Resume Next
+    Set wsPred = ActiveWorkbook.Sheets("予測データ")
+    On Error GoTo 0
+    If wsPred Is Nothing Then Exit Sub
+
+    Const HEADER_ROW9 As Long = 3
+    Dim lastRow9 As Long: lastRow9 = wsPred.Cells(wsPred.Rows.Count, 1).End(xlUp).Row
+    Dim lastCol9 As Long: lastCol9 = wsPred.Cells(HEADER_ROW9, wsPred.Columns.Count).End(xlToLeft).Column
+    If lastRow9 <= HEADER_ROW9 Then Exit Sub
+
+    Dim headerArr9 As Variant
+    headerArr9 = wsPred.Range(wsPred.Cells(HEADER_ROW9, 1), wsPred.Cells(HEADER_ROW9, lastCol9)).Value
+    Dim machCol9 As Long: machCol9 = -1
+    Dim danCol9 As Long: danCol9 = -1
+    Dim colCol9 As Long: colCol9 = -1
+    Dim codeCol9 As Long: codeCol9 = -1
+    Dim nameCol9 As Long: nameCol9 = -1
+    Dim hc9 As Long
+    For hc9 = 1 To lastCol9
+        Dim hName9 As String: hName9 = Trim(CStr(headerArr9(1, hc9)))
+        If hName9 = "号機" Then machCol9 = hc9
+        If hName9 = "段" Then danCol9 = hc9
+        If hName9 = "列" Then colCol9 = hc9
+        If hName9 = "品名コード" Then codeCol9 = hc9
+        If hName9 = "品名" Then nameCol9 = hc9
+    Next hc9
+    If machCol9 = -1 Or danCol9 = -1 Or colCol9 = -1 Then Exit Sub
+
+    Dim dataArr9 As Variant
+    dataArr9 = wsPred.Range(wsPred.Cells(HEADER_ROW9 + 1, 1), wsPred.Cells(lastRow9, lastCol9)).Value
+    Dim r9 As Long
+    For r9 = 1 To UBound(dataArr9, 1)
+        If IsNumeric(dataArr9(r9, machCol9)) And IsNumeric(dataArr9(r9, danCol9)) And IsNumeric(dataArr9(r9, colCol9)) Then
+            Dim locCode9 As String
+            locCode9 = CStr(CLng(dataArr9(r9, machCol9)) * 10000& + CLng(dataArr9(r9, danCol9)) * 100& + CLng(dataArr9(r9, colCol9)))
+            If Not dictLocName.Exists(locCode9) Then
+                If nameCol9 > 0 Then
+                    dictLocName.Add locCode9, Trim(CStr(dataArr9(r9, nameCol9)))
+                Else
+                    dictLocName.Add locCode9, ""
+                End If
+                Dim codeVal9 As Variant
+                If codeCol9 > 0 Then
+                    Dim codeStr9 As String: codeStr9 = Trim(CStr(dataArr9(r9, codeCol9)))
+                    If IsNumeric(codeStr9) Then codeVal9 = CLng(codeStr9) Else codeVal9 = codeStr9
+                Else
+                    codeVal9 = ""
+                End If
+                dictLocCode.Add locCode9, codeVal9
+            End If
+        End If
+    Next r9
+End Sub
 
 ' ----------------------------------------------------
 ' 操作パネル連携・KPI記録
