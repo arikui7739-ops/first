@@ -6,7 +6,7 @@ Option Explicit
 ' ピッキング実績ログ(S71)を解析し、同一ゾーン(51～58号機/61～68号機のいずれか)内で
 ' 号機が離れた場所同士が同時ピッキングされている商品を検出し、起点品の近くにある
 ' 非稼働品(ヒット数が少ない品)と入れ替える指示を作成する。
-' AB編成動線最適化(Module3)とは対象号機の範囲が異なる別エリア向けの改善指示のため、
+' AB対面分散(Module3)とは対象号機の範囲が異なる別エリア向けの改善指示のため、
 ' 独立したモジュールとして用意している(対象範囲・ロジックともMod3とは別)。
 ' ----------------------------------------------------
 
@@ -282,7 +282,7 @@ Sub SwapLocationsByCorrelationFast_Fix()
     If outCnt > 0 Then
         Dim wsOut As Worksheet
         On Error Resume Next
-        Sheets("同時ピッキング交換指示書").Delete
+        Sheets("Cバラ交換").Delete
         On Error GoTo 0
 
         ' 「操作パネル」シートがあればその左側に配置する
@@ -295,7 +295,7 @@ Sub SwapLocationsByCorrelationFast_Fix()
         Else
             Set wsOut = Sheets.Add
         End If
-        wsOut.Name = "同時ピッキング交換指示書"
+        wsOut.Name = "Cバラ交換"
 
         ' ロケーション列は日付等への誤変換防止のため文字列に、商品コード列は数値表示に統一
         wsOut.Columns("E:E").NumberFormat = "0"
@@ -489,16 +489,16 @@ Sub EnsureSwapCorrelationButton()
     Call LayoutPanelButtons
 End Sub
 
-' 「同時ピッキング改善KPI」シートが無ければ自動生成する
+' 「CバラKPI」シートが無ければ自動生成する
 Sub EnsureModule1KPISheet()
     Dim wsKPI As Worksheet
     On Error Resume Next
-    Set wsKPI = ThisWorkbook.Sheets("同時ピッキング改善KPI")
+    Set wsKPI = ThisWorkbook.Sheets("CバラKPI")
     On Error GoTo 0
     If Not wsKPI Is Nothing Then Exit Sub
 
     Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-    wsKPI.Name = "同時ピッキング改善KPI"
+    wsKPI.Name = "CバラKPI"
 
     wsKPI.Range("A1:C1").Merge
     wsKPI.Range("A1").Value = "【同時ピッキング改善 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
@@ -515,14 +515,14 @@ Sub EnsureModule1KPISheet()
     wsKPI.Columns("C:C").NumberFormat = "0"
 End Sub
 
-' 実施日・平均無駄歩行スコア・交換候補件数を「同時ピッキング改善KPI」シートに記録する。
+' 実施日・平均無駄歩行スコア・交換候補件数を「CバラKPI」シートに記録する。
 ' 同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
 Sub LogModule1KPI(avgWasteScore As Double, swapCount As Long, reportDate As Date)
     Call EnsureModule1KPISheet
 
     Dim wsKPI As Worksheet
     On Error Resume Next
-    Set wsKPI = ThisWorkbook.Sheets("同時ピッキング改善KPI")
+    Set wsKPI = ThisWorkbook.Sheets("CバラKPI")
     On Error GoTo 0
     If wsKPI Is Nothing Then Exit Sub
 

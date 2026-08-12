@@ -3,15 +3,15 @@ Option Explicit
 
 ' ----------------------------------------------------
 ' 構成比グラフの作成
-' 「予測構成比グラフ」:「予測データ」シート(Module8で取込済み)の投入回数_予測をゾーン別に集計してグラフ化する
-' 「実績構成比グラフ」:ピッキング実績ファイル(S71)をダイアログで選択し、ゾーン別ヒット数を集計してグラフ化する
+' 「予測グラフ」:「予測データ」シート(Module8で取込済み)の投入回数_予測をゾーン別に集計してグラフ化する
+' 「実績グラフ」:ピッキング実績ファイル(S71)をダイアログで選択し、ゾーン別ヒット数を集計してグラフ化する
 ' レイアウトは「設定」シートの「■機番別目標構成比」と同じ考え方で、AB01～AB46は機番ペア(ゾーン)ごとに
 ' 奇数機番を上向き・偶数機番を下向きに表示し、Cバラ(C01・C02)・拡張(X)は上向きの単独項目として追加する。
 ' 「設定」シートに目標構成比が入力されていれば、実績/予測の比率と並べて目標比率も折れ線で比較できるようにする。
 ' データ表にはCバラ・拡張も含めるが、グラフにはAB01～AB46のみを表示する(Cバラ・拡張はグラフの対象外)。
 ' グラフの縦軸目盛りは予測・実績のグラフ間で見比べやすいよう固定スケール(既定は±5%・1%刻み)にし、
 ' 実データがそれを超える場合のみ切り上げて広げる(拠点間でも同じ基準を使う)。
-' 「実績構成比グラフ」の作成と同時に、「日別ロケーション実績」シート(品名コード・ロケ分類・品名・
+' 「実績グラフ」の作成と同時に、「日別実績」シート(品名コード・ロケ分類・品名・
 ' ロケーション・予測回数ごとの日別実績を並べた履歴表)も更新する。日別列はG～Pの最大10列で、
 ' 11日目以降は最も古い日(G列)を消して1列ずつ左に詰め、新しい日をP列に追加する。
 ' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
@@ -64,9 +64,9 @@ Sub CreateForecastRatioChart()
         End If
     Next r
 
-    Call BuildRatioChartSheet("予測構成比グラフ", "号機別構成比(予測データ)", dictActualByLabel, dictTargetByLabel)
+    Call BuildRatioChartSheet("予測グラフ", "号機別構成比(予測データ)", dictActualByLabel, dictTargetByLabel)
 
-    MsgBox "「予測構成比グラフ」を作成しました。", vbInformation
+    MsgBox "「予測グラフ」を作成しました。", vbInformation
 End Sub
 
 Sub CreateActualRatioChart()
@@ -124,7 +124,7 @@ Sub CreateActualRatioChart()
     Application.DisplayAlerts = False
 
     ' E行(機番2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)。
-    ' 併せて、機番+段+列単位の実績も集計する(「日別ロケーション実績」の更新に使う)
+    ' 併せて、機番+段+列単位の実績も集計する(「日別実績」の更新に使う)
     Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
     Dim dictLocationHits As Object: Set dictLocationHits = CreateObject("Scripting.Dictionary")
     Dim businessDate As Date: businessDate = DateSerial(1900, 1, 1)
@@ -137,7 +137,7 @@ Sub CreateActualRatioChart()
         Do While Not EOF(fileNo)
             Line Input #fileNo, textLine
             If Left(textLine, 1) = "B" And Len(textLine) >= 9 Then
-                ' B行の2～9文字目(8桁)が集計日(YYYYMMDD)。「日別ロケーション実績」の日付見出しに使う
+                ' B行の2～9文字目(8桁)が集計日(YYYYMMDD)。「日別実績」の日付見出しに使う
                 Dim bDateStr As String: bDateStr = Mid(textLine, 2, 8)
                 If IsNumeric(bDateStr) Then
                     Dim bDate As Date
@@ -184,7 +184,7 @@ Sub CreateActualRatioChart()
         Close #fileNo
     Next fIdx
 
-    Call BuildRatioChartSheet("実績構成比グラフ", "号機別構成比(S71実績)", dictActualByLabel, dictTargetByLabel)
+    Call BuildRatioChartSheet("実績グラフ", "号機別構成比(S71実績)", dictActualByLabel, dictTargetByLabel)
 
     If businessDate = DateSerial(1900, 1, 1) Then businessDate = Date ' B行から日付が読み取れなければ実行日を使う
     Call UpdateDailyLocationHistory(dictLocationHits, businessDate)
@@ -195,7 +195,7 @@ Sub CreateActualRatioChart()
 
     Dim noteMsg As String
     If Not hasZoneMap Then noteMsg = vbCrLf & "※「予測データ」シートが無いため、Cバラ(C01/C02)・拡張(X)は集計されていません(AB01～AB46のみ)。"
-    MsgBox "「実績構成比グラフ」「日別ロケーション実績」を作成・更新しました。(" & fd.SelectedItems.Count & "ファイル読込)" & noteMsg, vbInformation
+    MsgBox "「実績グラフ」「日別実績」を作成・更新しました。(" & fd.SelectedItems.Count & "ファイル読込)" & noteMsg, vbInformation
 End Sub
 
 ' 「設定」シートの「■機番別目標構成比」(N:O列)を、ラベル文字列をキーにしたまま読み込む
@@ -385,28 +385,28 @@ Sub EnsureRatioChartButtons()
     Dim existing As Shape
 
     On Error Resume Next
-    Set existing = wsPanel.Shapes("予測構成比グラフボタン")
+    Set existing = wsPanel.Shapes("予測グラフボタン")
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn1 As Button
         Set btn1 = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
-        btn1.Name = "予測構成比グラフボタン"
+        btn1.Name = "予測グラフボタン"
         btn1.OnAction = "CreateForecastRatioChart"
-        btn1.Characters.Text = "予測構成比グラフを作成"
+        btn1.Characters.Text = "予測グラフを作成"
         btn1.Font.Size = 12
         btn1.Font.Bold = True
     End If
 
     Set existing = Nothing
     On Error Resume Next
-    Set existing = wsPanel.Shapes("実績構成比グラフボタン")
+    Set existing = wsPanel.Shapes("実績グラフボタン")
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn2 As Button
         Set btn2 = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
-        btn2.Name = "実績構成比グラフボタン"
+        btn2.Name = "実績グラフボタン"
         btn2.OnAction = "CreateActualRatioChart"
-        btn2.Characters.Text = "実績構成比グラフを作成"
+        btn2.Characters.Text = "実績グラフを作成"
         btn2.Font.Size = 12
         btn2.Font.Bold = True
     End If
@@ -415,7 +415,7 @@ Sub EnsureRatioChartButtons()
     Call LayoutPanelButtons
 End Sub
 
-' 「日別ロケーション実績」シートを更新する(「予測データ」の行(品名コード・ロケ分類・品名・ロケーション・予測回数)を
+' 「日別実績」シートを更新する(「予測データ」の行(品名コード・ロケ分類・品名・ロケーション・予測回数)を
 ' 土台にして、日別のS71実績ヒット数(dictLocationHits、機番+段+列キー)を1日分の列として追加する。
 ' 「予測データ」に無いロケーションでS71実績があった場合は、品名・ロケ分類を不明のまま行を追加する。
 ' 日別列はG～Pの最大10列。既に同じ日付の列があればそこを上書きし、10列すべて埋まっていれば
@@ -457,7 +457,7 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
     Const DATE_COL_FIRST As Long = 7  ' G列
     Const DATE_COL_LAST As Long = 16  ' P列(最大10列)
     Const TOTAL_COL As Long = 17      ' Q列(日別実績の総計)
-    Dim histSheetName As String: histSheetName = "日別ロケーション実績"
+    Dim histSheetName As String: histSheetName = "日別実績"
 
     ' 既存シートがあれば、日付見出しと日別実績(ロケーションキー→値)を退避しておく
     Dim wsOut As Worksheet
@@ -606,7 +606,7 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
     wsOut.Range("A1").AutoFilter
 End Sub
 
-' 「日別ロケーション実績」の1行分について、日別列(dateColFirst～dateColLast)に実績値を書き込み、
+' 「日別実績」の1行分について、日別列(dateColFirst～dateColLast)に実績値を書き込み、
 ' 総計列(totalCol)にその合計を書く。targetColIdxの列には今回のdictLocationHitsの値、
 ' それ以外の列は退避しておいたdictOldHistory(過去の実績)の値をそのまま引き継ぐ
 Private Sub WriteDailyValues(ByVal wsOut As Worksheet, ByVal outRow As Long, ByVal eLocKey As String, ByVal rLocKey As String, dictLocationHits As Object, dictOldHistory As Object, ByVal targetColIdx As Long, ByVal dateColFirst As Long, ByVal dateColLast As Long, ByVal totalCol As Long)
@@ -633,7 +633,7 @@ Private Sub WriteDailyValues(ByVal wsOut As Worksheet, ByVal outRow As Long, ByV
     wsOut.Cells(outRow, totalCol).Value = totalVal
 End Sub
 
-' 「日別ロケーション実績」の日付見出しを「7/20(月)」のような表記で返す
+' 「日別実績」の日付見出しを「7/20(月)」のような表記で返す
 Private Function FormatHistoryDateHeader(ByVal d As Date) As String
     Dim wdNames As Variant: wdNames = Array("日", "月", "火", "水", "木", "金", "土")
     FormatHistoryDateHeader = Format(d, "m/d") & "(" & wdNames(Weekday(d) - 1) & ")"

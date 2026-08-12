@@ -2,12 +2,12 @@ Attribute VB_Name = "Module10_石狩"
 Option Explicit
 
 ' ----------------------------------------------------
-' 予測データに基づくロケ変指示の作成
+' 予測データに基づく号機間バランスの作成
 ' 「予測データ」シート(Module8で取込済み)の機番別実績(予測)構成比を、「設定」シートの
 ' 「■機番別目標構成比」に近づけるためのロケーション変更(入替)指示を作成する。
 ' 入替の相手先は必ず同じ段(例:46-02-05なら2段目)の中から選ぶ(段をまたぐ入替は行わない)。
 ' 除外機番・除外ロケーション・除外品コードは「設定」シートの設定に従う(Module3と共通)。
-' 候補件数は「設定」シートの「ロケ変候補件数」で個別に設定できる(AB編成動線最適化の
+' 候補件数は「設定」シートの「ロケ変候補件数」で個別に設定できる(AB対面分散の
 ' 「入替候補件数」とは別の設定)。
 ' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
 ' ----------------------------------------------------
@@ -37,7 +37,7 @@ Sub CreateRelocationPlan()
     Dim weightWeightCoef As Double: weightWeightCoef = 0.01
     Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, maxMachNum, abSlotCount, dictTargetRatio, catWeight, sizeWeight, weightWeightCoef)
 
-    ' 在庫商品マスタ(任意、Module3と共通)。読み込めば、入替候補選定で入替先号機の同カテゴリー品集中度・
+    ' 在庫データ(任意、Module3と共通)。読み込めば、入替候補選定で入替先号機の同カテゴリー品集中度・
     ' サイズ差・重量差をソフトなペナルティとして反映する(未読込なら従来どおりの選定結果になる)
     Dim dictItemCategory As Object: Set dictItemCategory = CreateObject("Scripting.Dictionary")
     Dim dictItemWeightMaster As Object: Set dictItemWeightMaster = CreateObject("Scripting.Dictionary")
@@ -46,14 +46,14 @@ Sub CreateRelocationPlan()
 
     Dim relocCount As Long: relocCount = GetRelocationCandidateCount()
 
-    ' 「機番別目標構成比」に数値機番キーが1つも無ければ、近づけるべき目標が無いためロケ変指示を作成できない
+    ' 「機番別目標構成比」に数値機番キーが1つも無ければ、近づけるべき目標が無いため号機間バランスを作成できない
     Dim hasAnyTarget As Boolean: hasAnyTarget = False
     Dim chkKey As Variant
     For Each chkKey In dictTargetRatio.Keys
         If IsNumeric(chkKey) Then hasAnyTarget = True: Exit For
     Next chkKey
     If Not hasAnyTarget Then
-        MsgBox "「設定」シートの「■機番別目標構成比」に機番別の目標値が入力されていないため、ロケ変指示を作成できません。", vbExclamation
+        MsgBox "「設定」シートの「■機番別目標構成比」に機番別の目標値が入力されていないため、号機間バランスを作成できません。", vbExclamation
         Exit Sub
     End If
 
@@ -101,7 +101,7 @@ Sub CreateRelocationPlan()
     Dim dictByDan As Object: Set dictByDan = CreateObject("Scripting.Dictionary") ' 段→その段のロケーション行(添字)のCollection
     Dim dictByMach As Object: Set dictByMach = CreateObject("Scripting.Dictionary") ' 機番→その機番のロケーション行(添字)のCollection
     Dim dictRowMach As Object: Set dictRowMach = CreateObject("Scripting.Dictionary") ' 行番号(文字列)→機番(商品属性ペナルティ計算用)
-    Dim dictRowCat As Object: Set dictRowCat = CreateObject("Scripting.Dictionary") ' 行番号→大分類コード等(在庫商品マスタ)
+    Dim dictRowCat As Object: Set dictRowCat = CreateObject("Scripting.Dictionary") ' 行番号→大分類コード等(在庫データ)
     Dim dictRowWt As Object: Set dictRowWt = CreateObject("Scripting.Dictionary") ' 行番号→重量(kg)
     Dim dictRowVol As Object: Set dictRowVol = CreateObject("Scripting.Dictionary") ' 行番号→体積
     Dim dictMachCatVol As Object: Set dictMachCatVol = CreateObject("Scripting.Dictionary") ' "機番|大分類コード"→その機番内の同カテゴリー品数
@@ -137,7 +137,7 @@ Sub CreateRelocationPlan()
                             rowCnt(rowN) = forecastCnt
                             rowUsed(rowN) = False
 
-                            ' 在庫商品マスタが読み込まれていれば、行番号をキーにカテゴリー・重量・体積を引けるようにする
+                            ' 在庫データが読み込まれていれば、行番号をキーにカテゴリー・重量・体積を引けるようにする
                             Dim rowKey As String: rowKey = CStr(rowN)
                             dictRowMach(rowKey) = mach
                             If itemCodeStr <> "" And IsNumeric(itemCodeStr) Then
@@ -205,7 +205,7 @@ Sub CreateRelocationPlan()
         End If
     Next trKey
     If targetRatioSum <= 0 Or targetedHitTotal <= 0 Then
-        MsgBox "目標構成比が設定されている機番の実績(予測)データが見つからなかったため、ロケ変指示を作成できません。", vbExclamation
+        MsgBox "目標構成比が設定されている機番の実績(予測)データが見つからなかったため、号機間バランスを作成できません。", vbExclamation
         Exit Sub
     End If
 
@@ -304,13 +304,13 @@ Sub CreateRelocationPlan()
     Loop
 
     If outCnt = 0 Then
-        MsgBox "条件を満たすロケ変指示が見つかりませんでした。除外設定や目標構成比の入力内容をご確認ください。", vbExclamation
+        MsgBox "条件を満たす号機間バランスが見つかりませんでした。除外設定や目標構成比の入力内容をご確認ください。", vbExclamation
         Exit Sub
     End If
 
     ' 出力
     On Error Resume Next
-    ThisWorkbook.Sheets("ロケ変指示").Delete
+    ThisWorkbook.Sheets("号機間バランス").Delete
     On Error GoTo 0
 
     Dim wsOut As Worksheet
@@ -323,21 +323,21 @@ Sub CreateRelocationPlan()
     Else
         Set wsOut = Sheets.Add
     End If
-    wsOut.Name = "ロケ変指示"
+    wsOut.Name = "号機間バランス"
 
-    ' 品コード・ロケーションは先頭ゼロ落ち・日付誤変換防止のため文字列表示にする(AB編成動線最適化と同じ扱い)
+    ' 品コード・ロケーションは先頭ゼロ落ち・日付誤変換防止のため文字列表示にする(AB対面分散と同じ扱い)
     wsOut.Columns("B:B").NumberFormat = "@"
     wsOut.Columns("C:C").NumberFormat = "@"
     wsOut.Columns("G:G").NumberFormat = "@"
     wsOut.Columns("H:H").NumberFormat = "@"
 
     wsOut.Range("A1:J1").Merge
-    wsOut.Cells(1, 1).Value = "【予測データに基づくロケ変指示(候補" & outCnt & "件/設定" & relocCount & "件・入替相手は同じ段のみ)】"
+    wsOut.Cells(1, 1).Value = "【予測データに基づく号機間バランス(候補" & outCnt & "件/設定" & relocCount & "件・入替相手は同じ段のみ)】"
     wsOut.Cells(1, 1).Font.Bold = True: wsOut.Cells(1, 1).Font.Size = 14
     wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
     wsOut.Range("A2:J2").Merge
-    wsOut.Cells(2, 1).Value = "「設定」シートの■機番別目標構成比に近づけるよう、目標超過機番の高頻度ロケーションと目標未達機番のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「機番-段-列」の表記です(AB編成動線最適化と同じ)。"
+    wsOut.Cells(2, 1).Value = "「設定」シートの■機番別目標構成比に近づけるよう、目標超過機番の高頻度ロケーションと目標未達機番のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「機番-段-列」の表記です(AB対面分散と同じ)。"
     wsOut.Cells(2, 1).HorizontalAlignment = xlLeft
 
     wsOut.Range("A4:J4").Value = Array("【移動元品】(交換品コード)", "移動元品コード", "移動元ロケーション", "移動元予測回数", "交換方向", "【移動先品】(交換対象品)", "移動先品コード", "移動先ロケーション", "移動先予測回数", "構成比(移動元/移動先:変更前→変更後)")
@@ -347,10 +347,10 @@ Sub CreateRelocationPlan()
     wsOut.Range("A4:J4").Font.Bold = True
     wsOut.Columns("A:J").AutoFit
 
-    MsgBox "「ロケ変指示」シートを作成しました。(" & outCnt & "件)", vbInformation
+    MsgBox "「号機間バランス」シートを作成しました。(" & outCnt & "件)", vbInformation
 End Sub
 
-' AB編成動線最適化と同じ「機番-段-列」形式でロケーションを表記する(例:46-02-05)
+' AB対面分散と同じ「機番-段-列」形式でロケーションを表記する(例:46-02-05)
 Private Function FormatLocationStr(ByVal mach As Long, ByVal dan As Long, ByVal col As Long) As String
     FormatLocationStr = mach & "-" & Format(dan, "00") & "-" & Format(col, "00")
 End Function
@@ -396,7 +396,7 @@ Private Function FindBestPartnerRow(rowsCol As Collection, rowUsed() As Boolean,
     Dim bestScore As Double: bestScore = 0 ' 目標未達(pDev<0)の候補の中で、カテゴリー・サイズも加味した最良のものを選ぶ
 
     ' moverアイテム(srcRow)の属性は候補走査の前に1回だけ解決しておく(候補ごとに辞書引きし直すと、
-    ' 候補数の多いロケ変指示では無駄な処理が積み重なって動作が重くなるため。Module3のResolveMoverAttrを共用)
+    ' 候補数の多い号機間バランスでは無駄な処理が積み重なって動作が重くなるため。Module3のResolveMoverAttrを共用)
     Dim moverHasCat As Boolean, moverCat As String
     Dim moverHasWt As Boolean, moverWt As Double
     Dim moverHasVol As Boolean, moverVol As Double
@@ -440,7 +440,7 @@ Private Function GetRelocationCandidateCount() As Long
     End If
 End Function
 
-' 「操作パネル」シートにロケ変指示ボタンが無ければ追加する
+' 「操作パネル」シートに号機間バランスボタンが無ければ追加する
 ' (既存のボタン・図形と重ならないよう、一番下にあるものの少し下に配置する)
 Sub EnsureRelocationPlanButton()
     Dim wsPanel As Worksheet
@@ -451,14 +451,14 @@ Sub EnsureRelocationPlanButton()
 
     Dim existing As Shape
     On Error Resume Next
-    Set existing = wsPanel.Shapes("ロケ変指示ボタン")
+    Set existing = wsPanel.Shapes("号機間バランスボタン")
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn As Button
         Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
-        btn.Name = "ロケ変指示ボタン"
+        btn.Name = "号機間バランスボタン"
         btn.OnAction = "CreateRelocationPlan"
-        btn.Characters.Text = "ロケ変指示を作成"
+        btn.Characters.Text = "号機間バランスを作成"
         btn.Font.Size = 12
         btn.Font.Bold = True
     End If
@@ -469,14 +469,14 @@ End Sub
 
 ' ----------------------------------------------------
 ' AB(1～46号機)・Cバラ(51～68号機)・X拡張(70号機以上)の3ゾーン間で、
-' 出荷回数の順位に応じたゾーン間入替候補を作成する。
-' 出荷回数は「日別ロケーション実績」の月曜列(実績)を優先し、無ければ
+' 出荷回数の順位に応じたゾーンバランスを作成する。
+' 出荷回数は「日別実績」の月曜列(実績)を優先し、無ければ
 ' 「予測データ」の「投入回数_曜日平均」で代用する。
 ' 各ゾーンの容量は実際にある間口数(該当ロケーション数)をそのまま使い、
 ' 出荷回数の多い順にAB→C→Xの優先度で「あるべきゾーン」を決める。
 ' 段(棚の高さ)はAB/C/Xで形状が異なる別ゾーンのため考慮せず、順位のズレ
 ' だけでペアを作る。除外設定(除外号機・除外ロケーション・除外品コード)は
-' ロケ変指示と共通のものを使う。
+' 号機間バランスと共通のものを使う。
 ' ----------------------------------------------------
 Sub CreateZoneRebalancePlan()
     Call EnsureZoneRebalanceButton
@@ -542,12 +542,12 @@ Sub CreateZoneRebalancePlan()
         Exit Sub
     End If
 
-    ' 「日別ロケーション実績」の月曜列があれば、ロケーションごとの月曜実績を読み込む
+    ' 「日別実績」の月曜列があれば、ロケーションごとの月曜実績を読み込む
     Dim dictMondayActual As Object: Set dictMondayActual = CreateObject("Scripting.Dictionary")
     Dim hasMondayCol As Boolean: hasMondayCol = False
     Dim wsHist As Worksheet
     On Error Resume Next
-    Set wsHist = ThisWorkbook.Sheets("日別ロケーション実績")
+    Set wsHist = ThisWorkbook.Sheets("日別実績")
     On Error GoTo 0
     If Not wsHist Is Nothing Then
         Const HIST_DATE_COL_FIRST As Long = 7
@@ -714,7 +714,7 @@ Sub CreateZoneRebalancePlan()
     End If
 
     On Error Resume Next
-    ThisWorkbook.Sheets("ゾーン間入替候補").Delete
+    ThisWorkbook.Sheets("ゾーンバランス").Delete
     On Error GoTo 0
 
     Dim wsOut As Worksheet
@@ -727,7 +727,7 @@ Sub CreateZoneRebalancePlan()
     Else
         Set wsOut = Sheets.Add
     End If
-    wsOut.Name = "ゾーン間入替候補"
+    wsOut.Name = "ゾーンバランス"
 
     ' 現状・目標・施策後見込みのゾーン別構成比をまとめて先頭に表示する
     Dim sumAB As Double, sumC As Double, sumX As Double, sumAll As Double
@@ -802,7 +802,7 @@ Sub CreateZoneRebalancePlan()
     wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(outR, 10)).Columns.AutoFit
     wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).AutoFilter
 
-    MsgBox "「ゾーン間入替候補」シートを作成しました。(" & outRows.Count & "件)", vbInformation
+    MsgBox "「ゾーンバランス」シートを作成しました。(" & outRows.Count & "件)", vbInformation
 End Sub
 
 ' idx()を、rCnt()の値が大きい順(降順)に並べ替える(QuickSort)
@@ -844,7 +844,7 @@ Private Sub AppendZonePairs(outRows As Collection, colInto As Collection, colOut
     Next k
 End Sub
 
-' 「操作パネル」シートにゾーン間入替候補作成ボタンが無ければ追加する
+' 「操作パネル」シートにゾーンバランス作成ボタンが無ければ追加する
 Sub EnsureZoneRebalanceButton()
     Dim wsPanel As Worksheet
     On Error Resume Next
@@ -854,14 +854,14 @@ Sub EnsureZoneRebalanceButton()
 
     Dim existing As Shape
     On Error Resume Next
-    Set existing = wsPanel.Shapes("ゾーン間入替候補ボタン")
+    Set existing = wsPanel.Shapes("ゾーンバランスボタン")
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn As Button
         Set btn = wsPanel.Buttons.Add(wsPanel.Range("B24").Left, wsPanel.Range("B24").Top, 220, 36)
-        btn.Name = "ゾーン間入替候補ボタン"
+        btn.Name = "ゾーンバランスボタン"
         btn.OnAction = "CreateZoneRebalancePlan"
-        btn.Characters.Text = "ゾーン間入替候補作成"
+        btn.Characters.Text = "ゾーンバランス作成"
         btn.Font.Size = 12
         btn.Font.Bold = True
     End If

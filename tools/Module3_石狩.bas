@@ -28,7 +28,7 @@ Sub OptimizeABFormationFlow()
     Set dictItemMach = CreateObject("Scripting.Dictionary")
     Set dictItemZone = CreateObject("Scripting.Dictionary")
 
-    ' 在庫商品マスタ(任意、WF021L1形式)による入替候補の絞り込み用。属性マスタが未読込なら常に空のままで、
+    ' 在庫データ(任意、WF021L1形式)による入替候補の絞り込み用。属性マスタが未読込なら常に空のままで、
     ' 挙動は従来どおり(スコアに影響しない)になる
     Dim dictItemCat As Object: Set dictItemCat = CreateObject("Scripting.Dictionary") ' locKey→大分類コード
     Dim dictItemWt As Object: Set dictItemWt = CreateObject("Scripting.Dictionary") ' locKey→重量(kg)
@@ -98,7 +98,7 @@ Sub OptimizeABFormationFlow()
     Dim maxSwapRows As Long: maxSwapRows = 15
     Dim maxMachNum As Long: maxMachNum = 46 ' この機番までを集計・スワップ対象の範囲とする(拠点のラック総数に合わせて設定シートで変更可能)
     Dim abSlotCount As Long: abSlotCount = 900 ' ABの間口数(AB得意先スコアの理論値算出に使う上位件数)
-    Dim catWeight As Double: catWeight = 0.005 ' 入替先号機の同カテゴリー品1件あたりの減点係数(在庫商品マスタ読込時のみ有効)
+    Dim catWeight As Double: catWeight = 0.005 ' 入替先号機の同カテゴリー品1件あたりの減点係数(在庫データ読込時のみ有効)
     Dim sizeWeight As Double: sizeWeight = 0.01 ' サイズ(体積)差1桁(対数比)あたりの減点係数
     Dim weightWeightCoef As Double: weightWeightCoef = 0.01 ' 重量差1桁(対数比)あたりの減点係数
     Call EnsureExclusionSettingsSheet
@@ -151,7 +151,7 @@ Sub OptimizeABFormationFlow()
         ' 0.7 品名マスタ・ロケーションマスタ(任意)の読込。選べばCFシートの品名・品コードをこちらで上書き・補完する
         Call LoadItemMasterFilesIfSelected(dictLocCode, dictLocName)
 
-        ' 0.8 在庫商品マスタ(任意、在庫状況ダウンロード=WF021L1形式)の読込。
+        ' 0.8 在庫データ(任意、在庫状況ダウンロード=WF021L1形式)の読込。
         ' サイズ・重量・カテゴリーが分かれば、入替候補選定でこれまで人が目視判断していた
         ' 「同カテゴリーが集中しない」「サイズ・重量が近い」をスコアの目安に反映できる
         Call LoadItemAttributeMasterFromSheet(dictItemCategory, dictItemWeightMaster, dictItemVolumeMaster)
@@ -509,11 +509,11 @@ Sub OptimizeABFormationFlow()
                     Next zKey
                 End If
             End If
-            ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補(在庫商品マスタがあればその中で一番属性が近い候補)
+            ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補(在庫データがあればその中で一番属性が近い候補)
             If targetItem = "" Then
                 targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, True, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
             End If
-            ' パス3:制限なしで、最初に見つかった候補(最終手段。在庫商品マスタがあればその中で一番属性が近い候補)
+            ' パス3:制限なしで、最初に見つかった候補(最終手段。在庫データがあればその中で一番属性が近い候補)
             If targetItem = "" Then
                 targetItem = FindFirstCandidate(zoneItems, anchorZone, aItem, mItem, dictSwapped, dictZoneUsedCount, False, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
             End If
@@ -577,7 +577,7 @@ Sub OptimizeABFormationFlow()
     If outCnt > 0 Then
         Dim wsOut As Worksheet
         On Error Resume Next
-        Sheets("AB編成動線最適化").Delete
+        Sheets("AB対面分散").Delete
         Sheets("対面化促進スワップ指示").Delete ' 旧バージョンで作成された出力シートが残っていれば削除する
         On Error GoTo 0
 
@@ -591,7 +591,7 @@ Sub OptimizeABFormationFlow()
         Else
             Set wsOut = Sheets.Add
         End If
-        wsOut.Name = "AB編成動線最適化"
+        wsOut.Name = "AB対面分散"
 
         wsOut.Columns("F:F").NumberFormat = "@"
         wsOut.Columns("I:I").NumberFormat = "@"
@@ -599,7 +599,7 @@ Sub OptimizeABFormationFlow()
 
         ' タイトル・サマリー行はA:M列で結合し、A列だけが横に伸びないようにする
         wsOut.Range("A1:M1").Merge
-        wsOut.Cells(1, 1).Value = "【AB編成動線最適化(入替候補" & maxSwapRows & "件)】"
+        wsOut.Cells(1, 1).Value = "【AB対面分散(入替候補" & maxSwapRows & "件)】"
         wsOut.Cells(1, 1).Font.Bold = True: wsOut.Cells(1, 1).Font.Size = 14
         wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
@@ -683,7 +683,7 @@ Sub OptimizeABFormationFlow()
         Next zi
         wsOut.Range(wsOut.Cells(heatLabelRow, heatFirstCol), wsOut.Cells(heatPctRow, heatLastCol)).Borders.LineStyle = xlContinuous
 
-        ' 7. 同号機分散ロケーション変更指示(同号機内(対面を除く)ペアのみを対象にする。対面ヒットは対象外)
+        ' 7. 同号機分散(同号機内(対面を除く)ペアのみを対象にする。対面ヒットは対象外)
         Dim maxSameMachPairs As Long: maxSameMachPairs = dictPairs.Count - dictCrossFace.Count
         ' 対象ペアが無い/入替案が1件も出ない場合でも均衡化スコアが算出できるよう、既定値を変更前と同じにしておく
         Dim oddTotalSM As Double, evenTotalSM As Double
@@ -795,11 +795,11 @@ Sub OptimizeABFormationFlow()
                             Next zKeySM
                         End If
                     End If
-                    ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補(在庫商品マスタがあればその中で一番属性が近い候補)
+                    ' パス2:ゾーン利用上限内で、比率・サイドを問わず最初に見つかった候補(在庫データがあればその中で一番属性が近い候補)
                     If targetItemSM = "" Then
                         targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, True, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
                     End If
-                    ' パス3:制限なしで、最初に見つかった候補(最終手段。在庫商品マスタがあればその中で一番属性が近い候補)
+                    ' パス3:制限なしで、最初に見つかった候補(最終手段。在庫データがあればその中で一番属性が近い候補)
                     If targetItemSM = "" Then
                         targetItemSM = FindFirstCandidate(zoneItems, anchorZoneSM, aItemSM, mItemSM, dictSwappedSM, dictZoneUsedCountSM, False, MAX_PER_ZONE, dictItemMach, dictItemCat, dictItemWt, dictItemVol, dictMachCatVol, catWeight, sizeWeight, weightWeightCoef)
                     End If
@@ -857,7 +857,7 @@ Sub OptimizeABFormationFlow()
             If outCntSM > 0 Then
                 Dim wsOutSM As Worksheet
                 On Error Resume Next
-                Sheets("同号機分散ロケーション変更指示").Delete
+                Sheets("同号機分散").Delete
                 On Error GoTo 0
 
                 Dim wsPanelSM As Worksheet
@@ -869,14 +869,14 @@ Sub OptimizeABFormationFlow()
                 Else
                     Set wsOutSM = Sheets.Add
                 End If
-                wsOutSM.Name = "同号機分散ロケーション変更指示"
+                wsOutSM.Name = "同号機分散"
 
                 wsOutSM.Columns("F:F").NumberFormat = "@"
                 wsOutSM.Columns("I:I").NumberFormat = "@"
                 wsOutSM.Columns("M:M").NumberFormat = "@"
 
                 wsOutSM.Range("A1:M1").Merge
-                wsOutSM.Cells(1, 1).Value = "【同号機分散ロケーション変更指示(同号機内・対面を除くペアのみ・入替候補" & maxSwapRows & "件)】"
+                wsOutSM.Cells(1, 1).Value = "【同号機分散(同号機内・対面を除くペアのみ・入替候補" & maxSwapRows & "件)】"
                 wsOutSM.Cells(1, 1).Font.Bold = True: wsOutSM.Cells(1, 1).Font.Size = 14
                 wsOutSM.Cells(1, 1).HorizontalAlignment = xlLeft
 
@@ -1041,7 +1041,7 @@ Sub OptimizeABFormationFlow()
         On Error GoTo 0
 
         Dim completeMsg As String
-        completeMsg = "「AB編成動線最適化」の作成が完了しました。(" & selectedFileCount & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
+        completeMsg = "「AB対面分散」の作成が完了しました。(" & selectedFileCount & "ファイル読込／" & outCnt & "件の入替案)" & vbCrLf & _
             "左右機番の差: " & Format(Abs(oddTotalStart - evenTotalStart), "0") & " → " & Format(Abs(oddTotal - evenTotal), "0")
         If useCache Then completeMsg = completeMsg & vbCrLf & "(前回読み込んだ実績データを再利用しました)"
         If abRatioScoreNote <> "" Then completeMsg = completeMsg & vbCrLf & "※" & abRatioScoreNote
@@ -1115,7 +1115,7 @@ Function FindBestUnderTargetCandidate(zoneItems As Object, anchorZone As Integer
                         Dim candMachKey As String: candMachKey = CStr(candMach)
                         If dictTargetRatio.Exists(candMachKey) Then
                             Dim dev As Double: dev = (machHitLive(candMach) / targetedHitTotal) - (dictTargetRatio(candMachKey) / targetRatioSum)
-                            ' 在庫商品マスタが読み込まれていれば、比率の差に「同カテゴリー集中度・サイズ差・重量差」の
+                            ' 在庫データが読み込まれていれば、比率の差に「同カテゴリー集中度・サイズ差・重量差」の
                             ' ソフトなペナルティを加味する(未読込なら常に0で従来と同じ結果になる)
                             Dim combinedScore As Double
                             combinedScore = dev + ComputeAttrPenalty(candStr, dictItemMach, dictItemVol, dictItemWt, dictMachCatVol, moverHasCat, moverCat, moverHasWt, moverWt, moverHasVol, moverVol, catWeight, sizeWeight, weightWeightCoef)
@@ -1134,7 +1134,7 @@ End Function
 
 ' 交換先候補の中から、条件を満たす最初の候補を返す(目標比率を考慮しない従来どおりのフォールバック探索)
 Function FindFirstCandidate(zoneItems As Object, anchorZone As Integer, excludeItem1 As String, excludeItem2 As String, dictSwapped As Object, dictZoneUsedCount As Object, ByVal respectZoneLimit As Boolean, ByVal maxPerZone As Integer, dictItemMach As Object, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, dictMachCatVol As Object, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As String
-    ' 在庫商品マスタが読み込まれていなければ、従来どおり最初に見つかった候補をそのまま返す(挙動を変えない)
+    ' 在庫データが読み込まれていなければ、従来どおり最初に見つかった候補をそのまま返す(挙動を変えない)
     Dim hasAttrData As Boolean: hasAttrData = (dictItemCat.Count > 0 Or dictItemVol.Count > 0 Or dictItemWt.Count > 0)
     Dim bestPenalty As Double: bestPenalty = -1
     Dim bestCand As String: bestCand = ""
@@ -1178,7 +1178,7 @@ End Function
 ' 交換候補(candStr)にmoverアイテム(mItem)を入替配置した場合の「属人的判断」を数値化したペナルティ(小さいほど良い)。
 ' ①入替先候補が属する機番に、moverと同じ大分類コードの品が既にどれだけあるか(多いほど加点=同時ピッキング集中リスク)。
 ' ②候補とmoverのサイズ(体積)・重量の差(対数比。値が大きいほど物理的な入替えにくさが増す)。
-' 在庫商品マスタが未読込(各dictが空)の品目は該当項目を単純にスキップする(0加点のまま)
+' 在庫データが未読込(各dictが空)の品目は該当項目を単純にスキップする(0加点のまま)
 Function ComputeAttrPenalty(candStr As String, dictItemMach As Object, dictItemVol As Object, dictItemWt As Object, dictMachCatVol As Object, ByVal moverHasCat As Boolean, ByVal moverCat As String, ByVal moverHasWt As Boolean, ByVal moverWt As Double, ByVal moverHasVol As Boolean, ByVal moverVol As Double, ByVal catWeight As Double, ByVal sizeWeight As Double, ByVal weightWeightCoef As Double) As Double
     Dim penalty As Double: penalty = 0
     If moverHasCat Then
@@ -1214,7 +1214,7 @@ Function ComputeAttrPenalty(candStr As String, dictItemMach As Object, dictItemV
 End Function
 
 ' candStrアイテムの属性(カテゴリー・重量・体積)を1回だけ解決する(候補走査ループの前に1回だけ呼ぶ想定)。
-' ComputeAttrPenaltyを候補ごとに呼ぶたびにmoverの辞書引きをやり直すと、候補数が多いロケ変指示などで
+' ComputeAttrPenaltyを候補ごとに呼ぶたびにmoverの辞書引きをやり直すと、候補数が多い号機間バランスなどで
 ' 無駄な処理が積み重なり動作が重くなるため、事前に解決した値を使い回す形にしている
 Sub ResolveMoverAttr(mItem As String, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object, ByRef moverHasCat As Boolean, ByRef moverCat As String, ByRef moverHasWt As Boolean, ByRef moverWt As Double, ByRef moverHasVol As Boolean, ByRef moverVol As Double)
     moverHasCat = dictItemCat.Exists(mItem)
@@ -1417,7 +1417,7 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     End If
 End Sub
 
-' 在庫商品マスタ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込む。
+' 在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込む。
 ' このファイルには品コードごとの大分類コード・実測(無ければ参考)の縦横高・重量が含まれており、
 ' これまで人が目視で判断していた「同カテゴリーを集中させない」「サイズ・重量が近いものを選ぶ」を
 ' 入替候補選定のソフトなスコアに反映するために使う。ファイル選択でキャンセルすれば何もせず、
@@ -1425,17 +1425,17 @@ End Sub
 ' 1～3行目はタイトル・空行・見出し行、4行目以降が空行またはデータ行(先頭の拠点コード等が数値のみ)。
 ' D列(4列目)=商品コード、103列目=大分類コード、68～71列目=参考の縦/横/高/重量、
 ' 84～87列目=実測の縦/横/高/重量(実測が無ければ参考を使う)
-' 在庫商品マスタ(在庫状況ダウンロード・WF021L1形式のCSV)を取り込み、「在庫商品マスタ」シートに保存する。
+' 在庫データ(在庫状況ダウンロード・WF021L1形式のCSV)を取り込み、「在庫データ」シートに保存する。
 ' 予測データ取込(Module8)と同様に一度取り込めば済み、以降はマクロ実行のたびにファイルを選び直す必要がない
-' (「在庫商品マスタ」シートが残っている限り、AB編成動線最適化・ロケ変指示はそこから読み込む)。
-' 既存の「在庫商品マスタ」シートは削除してから作り直すため、再取込すると内容が更新される
+' (「在庫データ」シートが残っている限り、AB対面分散・号機間バランスはそこから読み込む)。
+' 既存の「在庫データ」シートは削除してから作り直すため、再取込すると内容が更新される
 Sub ImportItemAttributeMaster()
     Call EnsureItemAttributeImportButton
 
     Dim fd5 As Office.FileDialog
     Set fd5 = Application.FileDialog(msoFileDialogFilePicker)
     With fd5
-        .Title = "在庫商品マスタ(在庫状況ダウンロード・WF021L1形式のCSV)を選択"
+        .Title = "在庫データ(在庫状況ダウンロード・WF021L1形式のCSV)を選択"
         .Filters.Clear
         .Filters.Add "すべてのファイル", "*.*"
         .AllowMultiSelect = False
@@ -1515,7 +1515,7 @@ Sub ImportItemAttributeMaster()
     End If
 
     On Error Resume Next
-    Sheets("在庫商品マスタ").Delete
+    Sheets("在庫データ").Delete
     On Error GoTo 0
 
     Dim wsAttr As Worksheet
@@ -1528,13 +1528,13 @@ Sub ImportItemAttributeMaster()
     Else
         Set wsAttr = Sheets.Add
     End If
-    wsAttr.Name = "在庫商品マスタ"
+    wsAttr.Name = "在庫データ"
 
     wsAttr.Columns("A:A").NumberFormat = "@" ' 品コードは先頭ゼロ落ち防止のため文字列扱いにする
     wsAttr.Columns("K:L").NumberFormat = "@" ' 発売開始・終了年月日(YYYYMMDD)は日付誤変換防止のため文字列扱いにする
 
     wsAttr.Range("A1:L1").Merge
-    wsAttr.Range("A1").Value = "【在庫商品マスタ取込】ファイル: " & Dir(filePath5) & _
+    wsAttr.Range("A1").Value = "【在庫データ取込】ファイル: " & Dir(filePath5) & _
         "　／　ファイル更新日時: " & Format(fileDate5, "yyyy/mm/dd hh:mm") & _
         "　／　取込日時: " & Format(Now, "yyyy/mm/dd hh:mm")
     wsAttr.Range("A1").Font.Bold = True: wsAttr.Range("A1").Font.Size = 12
@@ -1566,8 +1566,8 @@ Sub ImportItemAttributeMaster()
     Application.EnableEvents = True
     Application.ScreenUpdating = True
 
-    MsgBox "「在庫商品マスタ」シートを更新しました。(" & outRows.Count & "件取込)" & vbCrLf & _
-        "以降、AB編成動線最適化・ロケ変指示はこのシートのデータを使います(ファイル選択は不要です)。", vbInformation
+    MsgBox "「在庫データ」シートを更新しました。(" & outRows.Count & "件取込)" & vbCrLf & _
+        "以降、AB対面分散・号機間バランスはこのシートのデータを使います(ファイル選択は不要です)。", vbInformation
 End Sub
 
 ' ="00150" のようなExcel形式のCSVクォート(=と引用符で先頭ゼロなどを保護する書式)を検出し、
@@ -1580,7 +1580,7 @@ Function StripCsvQuote5(ByVal s As String) As String
     End If
 End Function
 
-' 「在庫商品マスタ」シート(ImportItemAttributeMasterで取込済み)から、カテゴリー・重量・体積を読み込む。
+' 「在庫データ」シート(ImportItemAttributeMasterで取込済み)から、カテゴリー・重量・体積を読み込む。
 ' シートが無い場合、または「設定」シートのチェックボックス(L13)がオフの場合は何もしない(辞書は空のまま=
 ' 従来どおりの動作になる)。ファイル選択ダイアログは出さない(取込はImportItemAttributeMasterの役目)
 Sub LoadItemAttributeMasterFromSheet(dictItemCategory As Object, dictItemWeightMaster As Object, dictItemVolumeMaster As Object)
@@ -1594,7 +1594,7 @@ Sub LoadItemAttributeMasterFromSheet(dictItemCategory As Object, dictItemWeightM
 
     Dim wsAttr As Worksheet
     On Error Resume Next
-    Set wsAttr = ThisWorkbook.Sheets("在庫商品マスタ")
+    Set wsAttr = ThisWorkbook.Sheets("在庫データ")
     On Error GoTo 0
     If Not wsAttr Is Nothing Then
 
@@ -1688,7 +1688,7 @@ Sub OverlayCategoryFromPredictionData(dictItemCategory As Object)
     Next r7
 End Sub
 
-' 「操作パネル」シートに在庫商品マスタ取込ボタンが無ければ追加する
+' 「操作パネル」シートに在庫データ取込ボタンが無ければ追加する
 Sub EnsureItemAttributeImportButton()
     Dim wsPanel As Worksheet
     On Error Resume Next
@@ -1698,14 +1698,14 @@ Sub EnsureItemAttributeImportButton()
 
     Dim existing As Shape
     On Error Resume Next
-    Set existing = wsPanel.Shapes("在庫商品マスタ取込ボタン")
+    Set existing = wsPanel.Shapes("在庫データ取込ボタン")
     On Error GoTo 0
     If existing Is Nothing Then
         Dim btn As Button
         Set btn = wsPanel.Buttons.Add(wsPanel.Range("H4").Left, wsPanel.Range("H4").Top, 220, 36)
-        btn.Name = "在庫商品マスタ取込ボタン"
+        btn.Name = "在庫データ取込ボタン"
         btn.OnAction = "ImportItemAttributeMaster"
-        btn.Characters.Text = "在庫商品マスタを取り込む"
+        btn.Characters.Text = "在庫データを取り込む"
         btn.Font.Size = 12
         btn.Font.Bold = True
     End If
@@ -1714,7 +1714,7 @@ Sub EnsureItemAttributeImportButton()
 End Sub
 
 ' locKey(機番+段+列)に対応する品コードをCFシート等の対応表(dictLocCode)から引き、
-' 在庫商品マスタ(品コード→カテゴリー・重量・体積)を使ってdictItemCat/dictItemWt/dictItemVolに
+' 在庫データ(品コード→カテゴリー・重量・体積)を使ってdictItemCat/dictItemWt/dictItemVolに
 ' locKeyキーで登録する。品コードが引けない、または属性マスタに該当が無い場合は何もしない
 Sub ResolveItemAttr(locKey As String, ByVal mach As Integer, ByVal dan As Integer, ByVal retsu As Integer, dictLocCode As Object, dictItemCategory As Object, dictItemWeightMaster As Object, dictItemVolumeMaster As Object, dictItemCat As Object, dictItemWt As Object, dictItemVol As Object)
     If dictItemCategory.Count = 0 And dictItemWeightMaster.Count = 0 And dictItemVolumeMaster.Count = 0 Then Exit Sub
@@ -1736,7 +1736,7 @@ End Sub
 ' ----------------------------------------------------
 
 ' 「操作パネル」シートが無い場合、マクロの説明と実行ボタンを自動生成する。
-' ブックの先頭シートとして配置し、以降このシートの左隣に各種出力シート(AB編成動線最適化など)が追加されていく。
+' ブックの先頭シートとして配置し、以降このシートの左隣に各種出力シート(AB対面分散など)が追加されていく。
 Sub EnsureOperationPanelSheet()
     Dim wsPanel As Worksheet
     On Error Resume Next
@@ -1750,7 +1750,7 @@ Sub EnsureOperationPanelSheet()
         wsPanel.Columns("B:H").ColumnWidth = 14
 
         wsPanel.Range("B2:H2").Merge
-        wsPanel.Range("B2").Value = "【AB編成動線最適化 操作パネル】"
+        wsPanel.Range("B2").Value = "【AB対面分散 操作パネル】"
         wsPanel.Range("B2").Font.Bold = True: wsPanel.Range("B2").Font.Size = 16
         wsPanel.Range("B2").HorizontalAlignment = xlLeft
 
@@ -1760,10 +1760,10 @@ Sub EnsureOperationPanelSheet()
             "同時に出庫されやすい商品同士を検出し、それらを別ゾーンへ分散配置し直すための入替候補を提案するツールです。" & _
             "同時ピッキングの集中を緩和し、機番間の作業負荷を均等化することを目的としています。" & vbCrLf & vbCrLf & _
             "【使い方】" & vbCrLf & _
-            "①下の「AB編成動線最適化を実行」ボタンを押す" & vbCrLf & _
+            "①下の「AB対面分散を実行」ボタンを押す" & vbCrLf & _
             "②品名マスタ(S01)・ロケーションマスタ(S74)を使う場合はファイルを選ぶ(使わない場合はキャンセルでよい)" & vbCrLf & _
             "③ピッキング実績ファイル(S71で始まるファイル・複数選択可)を選ぶ" & vbCrLf & _
-            "④「AB編成動線最適化」「同号機分散ロケーション変更指示」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
+            "④「AB対面分散」「同号機分散」シートに入替候補・ヒートマップ・KPIが出力される" & vbCrLf & vbCrLf & _
             "【カスタマイズ】" & vbCrLf & _
             "除外機番・除外ロケーション・除外品コード・機番回数比シート名・入替候補件数・最大機番・AB間口数・機番別目標構成比などは「設定」シートで変更できます" & _
             "(シートが無ければ実行時に自動作成されます)。機番別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します。"
@@ -1774,9 +1774,9 @@ Sub EnsureOperationPanelSheet()
 
         Dim btn As Button
         Set btn = wsPanel.Buttons.Add(wsPanel.Range("B20").Left, wsPanel.Range("B20").Top, 220, 36)
-        btn.Name = "AB編成動線最適化ボタン"
+        btn.Name = "AB対面分散ボタン"
         btn.OnAction = "OptimizeABFormationFlow"
-        btn.Characters.Text = "AB編成動線最適化を実行"
+        btn.Characters.Text = "AB対面分散を実行"
         btn.Font.Size = 12
         btn.Font.Bold = True
     End If
@@ -1803,7 +1803,7 @@ Sub LayoutPanelButtons()
     Dim baseTop As Double: baseTop = wsPanel.Range("B20").Top
 
     Dim orderNames As Variant
-    orderNames = Array("AB編成動線最適化ボタン", "予測データ取込ボタン", "在庫商品マスタ取込ボタン", "予測構成比グラフボタン", "実績構成比グラフボタン", "ロケ変指示ボタン", "ゾーン間入替候補ボタン")
+    orderNames = Array("AB対面分散ボタン", "予測データ取込ボタン", "在庫データ取込ボタン", "予測グラフボタン", "実績グラフボタン", "号機間バランスボタン", "ゾーンバランスボタン")
 
     Dim idx As Long, placedCount As Long: placedCount = 0
     For idx = LBound(orderNames) To UBound(orderNames)
@@ -1859,7 +1859,7 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("A1:I1").Merge
     wsSet.Range("A1").Value = _
-        "AB編成動線最適化で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。" & _
+        "AB対面分散で除外する条件をここで設定します。①除外機番:スワップ対象・AB稼働率スコアから機番ごと除外。" & _
         "②除外ロケーション:常時使用スロットなど機番×段×列の範囲を、スワップ対象・稼働率・ヒートマップ集計のすべてから" & _
         "除外(段From/To・列From/Toはそれぞれ空欄にすると「全段」「全列」扱いになる)。" & _
         "③除外品コード:その品コードを格納場所を問わず全ての集計・スワップ対象から除外" & _
@@ -1867,7 +1867,7 @@ Sub EnsureExclusionSettingsSheet()
         "④機番別目標構成比:各機番の目標構成比(%)を入力すると、入替提案が奇数偶数バランスより目標比率への近さを" & _
         "優先するようになる(未入力ならこれまでどおり奇数偶数バランス優先)。合計が100%になっていなくても、" & _
         "入力した機番どうしの相対バランスとして扱われる(Cバラ等AB以外への出荷分があっても問題ない)。" & _
-        "⑤属性考慮係数(L9～L11):在庫商品マスタ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込んだ場合のみ有効。" & _
+        "⑤属性考慮係数(L9～L11):在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込んだ場合のみ有効。" & _
         "入替候補の選定時、入替先号機の同カテゴリー品の集中度・サイズ差・重量差をスコアに軽く反映する" & _
         "(値が大きいほど強く反映)。各表の5行目以降に追加・削除して使ってください。"
     wsSet.Range("A1").Font.Bold = True
@@ -1904,7 +1904,7 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("K5").Value = "入替候補件数"
     wsSet.Range("K5").Font.Bold = True
-    wsSet.Range("L5").Value = 15 ' 「AB編成動線最適化」に出力する入替候補の最大行数
+    wsSet.Range("L5").Value = 15 ' 「AB対面分散」に出力する入替候補の最大行数
 
     wsSet.Range("K6").Value = "最大機番"
     wsSet.Range("K6").Font.Bold = True
@@ -1916,11 +1916,11 @@ Sub EnsureExclusionSettingsSheet()
 
     wsSet.Range("K8").Value = "ロケ変候補件数"
     wsSet.Range("K8").Font.Bold = True
-    wsSet.Range("L8").Value = 20 ' 「ロケ変指示」(予測データに基づく目標構成比への調整案)に出力する候補の最大件数。入替候補件数(L5)とは別の設定
+    wsSet.Range("L8").Value = 20 ' 「号機間バランス」(予測データに基づく目標構成比への調整案)に出力する候補の最大件数。入替候補件数(L5)とは別の設定
 
     Call EnsureAttrWeightSettings(wsSet)
 
-    wsSet.Range("K13").Value = "在庫商品マスタ"
+    wsSet.Range("K13").Value = "在庫データ"
     wsSet.Range("K13").Font.Bold = True
 
     wsSet.Range("N3").Value = "■機番別目標構成比"
@@ -1950,7 +1950,7 @@ Sub EnsureAttrWeightSettings(wsSet As Worksheet)
 
     wsSet.Range("K9").Value = "カテゴリー重み"
     wsSet.Range("K9").Font.Bold = True
-    wsSet.Range("L9").Value = 0.005 ' 入替先号機の同カテゴリー品1件あたりの減点係数(在庫商品マスタ読込時のみ有効)
+    wsSet.Range("L9").Value = 0.005 ' 入替先号機の同カテゴリー品1件あたりの減点係数(在庫データ読込時のみ有効)
 
     wsSet.Range("K10").Value = "サイズ重み"
     wsSet.Range("K10").Font.Bold = True
@@ -1962,23 +1962,23 @@ Sub EnsureAttrWeightSettings(wsSet As Worksheet)
 
     wsSet.Range("K12").Value = "カテゴリー粒度"
     wsSet.Range("K12").Font.Bold = True
-    wsSet.Range("L12").Value = "大分類" ' 在庫商品マスタのカテゴリー一致判定に使う粒度(大分類/中分類/小分類)
+    wsSet.Range("L12").Value = "大分類" ' 在庫データのカテゴリー一致判定に使う粒度(大分類/中分類/小分類)
     With wsSet.Range("L12").Validation
         .Delete
         .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="大分類,中分類,小分類"
     End With
 End Sub
 
-' 「在庫商品マスタを考慮する」チェックボックスが無ければ作成し、既存のものでもサイズ・位置・キャプションを
+' 「在庫データを考慮する」チェックボックスが無ければ作成し、既存のものでもサイズ・位置・キャプションを
 ' 常に最新化する(古いバージョンで作られた、隣の表と重なるサイズのチェックボックスが残っていても直る)
 Sub EnsureAttrCheckBox(wsSet As Worksheet)
     ' 過去バージョンで名前を付けずに作成した重複チェックボックスが残っていることがあるため、
-    ' 正しい名前(在庫商品マスタ考慮チェック)以外で「考慮する」を含むチェックボックスは削除してから作り直す
+    ' 正しい名前(在庫データ考慮チェック)以外で「考慮する」を含むチェックボックスは削除してから作り直す
     ' (Deleteしながら列挙すると取りこぼすことがあるため、対象名を先に集めてから別ループで削除する)
     Dim namesToDelete As Collection: Set namesToDelete = New Collection
     Dim cb As CheckBox
     For Each cb In wsSet.CheckBoxes
-        If cb.Name <> "在庫商品マスタ考慮チェック" Then
+        If cb.Name <> "在庫データ考慮チェック" Then
             If InStr(cb.Caption, "考慮する") > 0 Then namesToDelete.Add cb.Name
         End If
     Next cb
@@ -1991,13 +1991,13 @@ Sub EnsureAttrCheckBox(wsSet As Worksheet)
 
     Dim chkAttr As CheckBox
     On Error Resume Next
-    Set chkAttr = wsSet.CheckBoxes("在庫商品マスタ考慮チェック")
+    Set chkAttr = wsSet.CheckBoxes("在庫データ考慮チェック")
     On Error GoTo 0
     If chkAttr Is Nothing Then
         Set chkAttr = wsSet.CheckBoxes.Add(wsSet.Range("L13").Left, wsSet.Range("L13").Top - 2, 110, 18)
-        chkAttr.Name = "在庫商品マスタ考慮チェック"
+        chkAttr.Name = "在庫データ考慮チェック"
         chkAttr.LinkedCell = "$L$13"
-        chkAttr.Value = xlOn ' オフにすると、「在庫商品マスタ」シートを取込済みでも入替候補選定への反映をスキップする
+        chkAttr.Value = xlOn ' オフにすると、「在庫データ」シートを取込済みでも入替候補選定への反映をスキップする
     Else
         chkAttr.Left = wsSet.Range("L13").Left
         chkAttr.Top = wsSet.Range("L13").Top - 2
@@ -2048,7 +2048,7 @@ Sub LoadExclusionSettings(dictExcludedMach As Object, ByRef locMach() As Long, B
         If CLng(wsSet.Range("L7").Value) >= 1 Then abSlotCount = CLng(wsSet.Range("L7").Value)
     End If
 
-    ' 属性考慮係数(L9～L11)。0以上の数値が入っていればそれを使う(在庫商品マスタ読込時のみ実際に効く)
+    ' 属性考慮係数(L9～L11)。0以上の数値が入っていればそれを使う(在庫データ読込時のみ実際に効く)
     If IsNumeric(wsSet.Range("L9").Value) Then
         If CDbl(wsSet.Range("L9").Value) >= 0 Then catWeight = CDbl(wsSet.Range("L9").Value)
     End If
