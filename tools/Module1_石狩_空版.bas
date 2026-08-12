@@ -491,42 +491,15 @@ Sub EnsureSwapCorrelationButton()
     Call LayoutPanelButtons
 End Sub
 
-' 「CバラKPI」シートが無ければ自動生成する
-Sub EnsureModule1KPISheet()
-    Dim wsKPI As Worksheet
-    Call MigrateRenamedSheets
-
-    On Error Resume Next
-    Set wsKPI = ThisWorkbook.Sheets("CバラKPI")
-    On Error GoTo 0
-    If Not wsKPI Is Nothing Then Exit Sub
-
-    Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-    wsKPI.Name = "CバラKPI"
-
-    wsKPI.Range("A1:C1").Merge
-    wsKPI.Range("A1").Value = "【同時ピッキング改善 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
-    wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
-
-    wsKPI.Range("A3:C3").Value = Array("実施日", "平均無駄歩行スコア", "交換候補件数")
-    wsKPI.Range("A3:C3").Interior.Color = RGB(220, 230, 255)
-    wsKPI.Range("A3:C3").Font.Bold = True
-
-    wsKPI.Columns("A:A").ColumnWidth = 12
-    wsKPI.Columns("B:C").ColumnWidth = 18
-    wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
-    wsKPI.Columns("B:B").NumberFormat = "0.0"
-    wsKPI.Columns("C:C").NumberFormat = "0"
-End Sub
-
-' 実施日・平均無駄歩行スコア・交換候補件数を「CバラKPI」シートに記録する。
-' 同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行)。
+' 実施日・平均無駄歩行スコア・交換候補件数を、AB編成用の実績と同じ「KPI」シート
+' (Module3のEnsureKPISheetが作成・管理する統合シート)のI・J列に記録する。
+' 同じ実施日の行が既にあれば追記せず上書きする(実施日あたり1行。AB編成側の列は変更しない)。
 Sub LogModule1KPI(avgWasteScore As Double, swapCount As Long, reportDate As Date)
-    Call EnsureModule1KPISheet
+    Call EnsureKPISheet
 
     Dim wsKPI As Worksheet
     On Error Resume Next
-    Set wsKPI = ThisWorkbook.Sheets("CバラKPI")
+    Set wsKPI = ThisWorkbook.Sheets("KPI")
     On Error GoTo 0
     If wsKPI Is Nothing Then Exit Sub
 
@@ -534,9 +507,11 @@ Sub LogModule1KPI(avgWasteScore As Double, swapCount As Long, reportDate As Date
     Dim targetRow As Long: targetRow = 0
     Dim r As Long
     For r = 4 To lastRow
-        If wsKPI.Cells(r, 1).Value = reportDate Then
-            targetRow = r
-            Exit For
+        If IsDate(wsKPI.Cells(r, 1).Value) Then
+            If CDate(wsKPI.Cells(r, 1).Value) = reportDate Then
+                targetRow = r
+                Exit For
+            End If
         End If
     Next r
     If targetRow = 0 Then
@@ -545,6 +520,6 @@ Sub LogModule1KPI(avgWasteScore As Double, swapCount As Long, reportDate As Date
     End If
 
     wsKPI.Cells(targetRow, 1).Value = reportDate
-    wsKPI.Cells(targetRow, 2).Value = avgWasteScore
-    wsKPI.Cells(targetRow, 3).Value = swapCount
+    wsKPI.Cells(targetRow, 9).Value = avgWasteScore
+    wsKPI.Cells(targetRow, 10).Value = swapCount
 End Sub

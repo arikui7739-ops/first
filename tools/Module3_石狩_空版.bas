@@ -92,7 +92,8 @@ Sub OptimizeABFormationFlow()
     ' 0.4 「操作パネル」シート(説明・実行ボタン)が無ければ自動生成する
     Call EnsureOperationPanelSheet
 
-    ' 0.45 「KPI」シート(実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア)が無ければ自動生成する
+    ' 0.45 「KPI」シート(AB編成用の実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア等と、
+    ' 同時ピッキング改善用の平均無駄歩行スコア・交換候補件数を1つに統合したシート)が無ければ自動生成する
     Call EnsureKPISheet
 
     ' 0.5 拠点カスタマイズ設定の読込(「設定」シートが無ければ従来どおりの初期値で自動生成)
@@ -1911,24 +1912,91 @@ Sub EnsureKPISheet()
     On Error Resume Next
     Set wsKPI = ThisWorkbook.Sheets("KPI")
     On Error GoTo 0
-    If Not wsKPI Is Nothing Then Exit Sub
+    If wsKPI Is Nothing Then
+        Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
+        wsKPI.Name = "KPI"
 
-    Set wsKPI = ThisWorkbook.Sheets.Add(After:=ThisWorkbook.Sheets(ThisWorkbook.Sheets.Count))
-    wsKPI.Name = "KPI"
+        wsKPI.Range("A1:J1").Merge
+        wsKPI.Range("A1").Value = "【AB編成・同時ピッキング改善 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
+        wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
 
-    wsKPI.Range("A1:H1").Merge
-    wsKPI.Range("A1").Value = "【AB編成 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
-    wsKPI.Range("A1").Font.Bold = True: wsKPI.Range("A1").Font.Size = 14
+        wsKPI.Range("A3:J3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア", "均衡化スコア(変更前)", "均衡化スコア(変更後)", "同号機分散均衡化スコア(変更前)", "同号機分散均衡化スコア(変更後)", "平均無駄歩行スコア", "交換候補件数")
+        wsKPI.Range("A3:J3").Interior.Color = RGB(220, 230, 255)
+        wsKPI.Range("A3:J3").Font.Bold = True
 
-    wsKPI.Range("A3:H3").Value = Array("実施日", "AB上限回数比率", "AB実績回数比率", "AB同時ピッキング回避スコア", "均衡化スコア(変更前)", "均衡化スコア(変更後)", "同号機分散均衡化スコア(変更前)", "同号機分散均衡化スコア(変更後)")
-    wsKPI.Range("A3:H3").Interior.Color = RGB(220, 230, 255)
-    wsKPI.Range("A3:H3").Font.Bold = True
+        wsKPI.Columns("A:A").ColumnWidth = 12
+        wsKPI.Columns("B:J").ColumnWidth = 20
+        wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
+        wsKPI.Columns("B:C").NumberFormat = "0.0%" ' 上限比率・実績比率は0～1の割合値で渡ってくる
+        wsKPI.Columns("D:J").NumberFormat = "0.0"  ' 回避スコア・均衡化スコア・無駄歩行スコアは0～100点、交換候補件数は整数
+    ElseIf Trim(CStr(wsKPI.Cells(3, 9).Value)) = "" Then
+        ' 統合前のAB編成専用(A～H列)のシートが残っている場合、I・J列(同時ピッキング改善用)を追加する
+        wsKPI.Range("A1:H1").UnMerge
+        wsKPI.Range("A1:J1").Merge
+        wsKPI.Range("A1").Value = "【AB編成・同時ピッキング改善 KPI推移】実施日ごとに1行で記録されます(同じ日に複数回実行した場合は上書き)"
+        wsKPI.Cells(3, 9).Value = "平均無駄歩行スコア"
+        wsKPI.Cells(3, 10).Value = "交換候補件数"
+        wsKPI.Range("I3:J3").Interior.Color = RGB(220, 230, 255)
+        wsKPI.Range("I3:J3").Font.Bold = True
+        wsKPI.Columns("I:J").ColumnWidth = 20
+        wsKPI.Columns("I:J").NumberFormat = "0.0"
+    End If
 
-    wsKPI.Columns("A:A").ColumnWidth = 12
-    wsKPI.Columns("B:H").ColumnWidth = 20
-    wsKPI.Columns("A:A").NumberFormat = "yyyy/mm/dd"
-    wsKPI.Columns("B:C").NumberFormat = "0.0%" ' 上限比率・実績比率は0～1の割合値で渡ってくる
-    wsKPI.Columns("D:H").NumberFormat = "0.0"  ' 回避スコア・均衡化スコアは0～100点
+    Call MergeSwapKPIIntoMainKPI
+End Sub
+
+' 「CバラKPI」または旧名「同時ピッキング改善KPI」シートに実施日ごとの記録が
+' 残っている場合、「KPI」シートのI・J列(平均無駄歩行スコア・交換候補件数)に
+' 実施日を突き合わせて統合し、統合し終えたら元のシートは削除する。
+Sub MergeSwapKPIIntoMainKPI()
+    Dim wsKPI As Worksheet
+    On Error Resume Next
+    Set wsKPI = ThisWorkbook.Sheets("KPI")
+    On Error GoTo 0
+    If wsKPI Is Nothing Then Exit Sub
+
+    Dim srcNames As Variant
+    srcNames = Array("CバラKPI", "同時ピッキング改善KPI")
+
+    Dim si As Long
+    For si = LBound(srcNames) To UBound(srcNames)
+        Dim wsSrc As Worksheet
+        On Error Resume Next
+        Set wsSrc = ThisWorkbook.Sheets(CStr(srcNames(si)))
+        On Error GoTo 0
+        If Not wsSrc Is Nothing Then
+            Dim srcLastRow As Long: srcLastRow = wsSrc.Cells(wsSrc.Rows.Count, "A").End(xlUp).Row
+            Dim r As Long
+            For r = 4 To srcLastRow
+                If IsDate(wsSrc.Cells(r, 1).Value) Then
+                    Dim d As Date: d = CDate(wsSrc.Cells(r, 1).Value)
+                    Dim kLastRow As Long: kLastRow = wsKPI.Cells(wsKPI.Rows.Count, "A").End(xlUp).Row
+                    Dim targetRow As Long: targetRow = 0
+                    Dim kr As Long
+                    For kr = 4 To kLastRow
+                        If IsDate(wsKPI.Cells(kr, 1).Value) Then
+                            If CDate(wsKPI.Cells(kr, 1).Value) = d Then
+                                targetRow = kr
+                                Exit For
+                            End If
+                        End If
+                    Next kr
+                    If targetRow = 0 Then
+                        targetRow = kLastRow + 1
+                        If targetRow < 4 Then targetRow = 4
+                    End If
+                    wsKPI.Cells(targetRow, 1).Value = d
+                    wsKPI.Cells(targetRow, 9).Value = wsSrc.Cells(r, 2).Value
+                    wsKPI.Cells(targetRow, 10).Value = wsSrc.Cells(r, 3).Value
+                End If
+            Next r
+
+            Application.DisplayAlerts = False
+            wsSrc.Delete
+            Application.DisplayAlerts = True
+        End If
+        Set wsSrc = Nothing
+    Next si
 End Sub
 
 ' 実施日・AB上限回数比率・AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア(変更前後)・
@@ -2342,7 +2410,7 @@ End Function
 ' ----------------------------------------------------
 ' シートタブの並び順を、決められた順序(予測データ→在庫データ→予測グラフ→
 ' 実績グラフ→Cバラ交換→AB対面分散→同号機分散→号機間バランス→
-' ゾーンバランス→操作パネル→設定→日別実績→KPI→CバラKPI)に揃える。
+' ゾーンバランス→操作パネル→設定→日別実績→KPI)に揃える。
 ' このブックに存在しないシートは読み飛ばす(バンドルによって作成される
 ' シートが異なるため)。この一覧に無いシートの並び順は変更しない。
 ' ----------------------------------------------------
@@ -2350,7 +2418,7 @@ Sub SortKnownSheets()
     Call EnsureSortSheetsButton
 
     Dim orderNames As Variant
-    orderNames = Array("予測データ", "在庫データ", "予測グラフ", "実績グラフ", "Cバラ交換", "AB対面分散", "同号機分散", "号機間バランス", "ゾーンバランス", "操作パネル", "設定", "日別実績", "KPI", "CバラKPI")
+    orderNames = Array("予測データ", "在庫データ", "予測グラフ", "実績グラフ", "Cバラ交換", "AB対面分散", "同号機分散", "号機間バランス", "ゾーンバランス", "操作パネル", "設定", "日別実績", "KPI")
 
     Dim prevSheet As Worksheet: Set prevSheet = Nothing
     Dim idx As Long
@@ -2415,8 +2483,7 @@ Sub MigrateRenamedSheets()
         Array("ロケ変指示", "号機間バランス"), _
         Array("ゾーン間入替候補", "ゾーンバランス"), _
         Array("日別ロケーション実績", "日別実績"), _
-        Array("AB編成KPI", "KPI"), _
-        Array("同時ピッキング改善KPI", "CバラKPI") _
+        Array("AB編成KPI", "KPI") _
     )
 
     Dim i As Long
