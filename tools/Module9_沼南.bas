@@ -441,78 +441,25 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
     Const TOTAL_COL As Long = 17      ' Q列(日別実績の総計)
     Dim histSheetName As String: histSheetName = "日別実績"
 
-    ' 既存シートがあれば、日付見出しと日別実績(ロケーションキー→値)を退避しておく
-    Dim wsOut As Worksheet
+    ' 既存シートがあれば、日付見出しと日別実績(ロケーションキー→日付ごとの値)を退避しておく
+    Dim wsOld As Worksheet
     On Error Resume Next
-    Set wsOut = ThisWorkbook.Sheets(histSheetName)
+    Set wsOld = ThisWorkbook.Sheets(histSheetName)
     On Error GoTo 0
 
-    Dim newHeader As String: newHeader = FormatHistoryDateHeader(businessDate)
-    Dim dateHeaders(DATE_COL_FIRST To DATE_COL_LAST) As String
-    Dim dictOldHistory As Object: Set dictOldHistory = CreateObject("Scripting.Dictionary") ' ロケーション(数値文字列)→10列分の実績配列
-    Dim existingDateCount As Long: existingDateCount = 0
-    Dim overwriteColIdx As Long: overwriteColIdx = -1 ' 同じ日付の列が既にあれば、新規追加せずそこを上書きする
-
-    If Not wsOut Is Nothing Then
-        Dim dc As Long
-        For dc = DATE_COL_FIRST To DATE_COL_LAST
-            Dim hv As String: hv = Trim(CStr(wsOut.Cells(1, dc).Value))
-            dateHeaders(dc) = hv
-            If hv <> "" Then
-                existingDateCount = existingDateCount + 1
-                If hv = newHeader Then overwriteColIdx = dc
-            End If
-        Next dc
-
-        Dim lastOutRow As Long: lastOutRow = wsOut.Cells(wsOut.Rows.Count, 1).End(xlUp).Row
-        If lastOutRow >= 2 Then
-            Dim orow As Long
-            For orow = 2 To lastOutRow
-                Dim oLocKey As String: oLocKey = Trim(CStr(wsOut.Cells(orow, 4).Value))
-                If oLocKey <> "" And Not dictOldHistory.Exists(oLocKey) Then
-                    Dim vals(DATE_COL_FIRST To DATE_COL_LAST) As Variant
-                    For dc = DATE_COL_FIRST To DATE_COL_LAST
-                        vals(dc) = wsOut.Cells(orow, dc).Value
-                    Next dc
-                    dictOldHistory.Add oLocKey, vals
-                End If
-            Next orow
-        End If
-    End If
-
-    ' 今回の日付を書き込む列を決める(同じ日付があれば上書き、無ければ次の空き列。
-    ' 10列すべて埋まっていれば1列分左にシフトしてP列を空ける)
-    Dim targetColIdx As Long
-    If overwriteColIdx > 0 Then
-        targetColIdx = overwriteColIdx
-    ElseIf existingDateCount < (DATE_COL_LAST - DATE_COL_FIRST + 1) Then
-        targetColIdx = DATE_COL_FIRST + existingDateCount
-    Else
-        Dim shiftCol As Long
-        For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
-            dateHeaders(shiftCol) = dateHeaders(shiftCol + 1)
-        Next shiftCol
-        dateHeaders(DATE_COL_LAST) = ""
-
-        Dim shiftKey As Variant
-        For Each shiftKey In dictOldHistory.Keys
-            Dim shiftVals As Variant: shiftVals = dictOldHistory(shiftKey)
-            For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
-                shiftVals(shiftCol) = shiftVals(shiftCol + 1)
-            Next shiftCol
-            shiftVals(DATE_COL_LAST) = Empty
-            dictOldHistory(shiftKey) = shiftVals
-        Next shiftKey
-
-        targetColIdx = DATE_COL_LAST
-    End If
-    dateHeaders(targetColIdx) = newHeader
+    ' 列の並び順は読み込んだ順ではなく、実際の日付の新旧で決める(古い日付ほど左、
+    ' 最大10件を超える分は最も古い日付から削られる。同じ日付が既にあれば上書きする)
+    Dim dictOldHistory As Object: Set dictOldHistory = CreateObject("Scripting.Dictionary") ' ロケーションキー→Dictionary(日付シリアル値→値)
+    Dim finalDates() As Long
+    Call BuildSortedHistoryDates(wsOld, 4, DATE_COL_FIRST, DATE_COL_LAST, businessDate, dictOldHistory, finalDates)
+    Dim businessDateSerial As Long: businessDateSerial = CLng(businessDate)
 
     ' シートを「予測データ」の現在の内容で作り直す
     On Error Resume Next
     ThisWorkbook.Sheets(histSheetName).Delete
     On Error GoTo 0
 
+    Dim wsOut As Worksheet
     Dim wsPanel As Worksheet
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
@@ -529,9 +476,10 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
     wsOut.Columns("F:F").NumberFormat = "@"
 
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 6)).Value = Array("コード", "ロケ分類", "品名", "ロケーション", "予測回数", "行ラベル")
-    For dc = DATE_COL_FIRST To DATE_COL_LAST
-        wsOut.Cells(1, dc).Value = dateHeaders(dc)
-    Next dc
+    Dim dNo As Long
+    For dNo = 1 To UBound(finalDates)
+        wsOut.Cells(1, DATE_COL_FIRST + dNo - 1).Value = FormatHistoryDateHeader(CDate(finalDates(dNo)))
+    Next dNo
     wsOut.Cells(1, TOTAL_COL).Value = "総計"
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Font.Bold = True
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Interior.Color = RGB(220, 230, 255)
@@ -558,7 +506,7 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
             Dim eLocKey As String: eLocKey = Format(mach, "00") & Format(dan, "00") & Format(colv, "00")
             If Not dictCoveredLocKeys.Exists(eLocKey) Then dictCoveredLocKeys.Add eLocKey, True
 
-            Call WriteDailyValues(wsOut, outRow, eLocKey, rLocKey, dictLocationHits, dictOldHistory, targetColIdx, DATE_COL_FIRST, DATE_COL_LAST, TOTAL_COL)
+            Call WriteHistoryValues(wsOut, outRow, eLocKey, rLocKey, dictLocationHits, dictOldHistory, finalDates, DATE_COL_FIRST, TOTAL_COL, businessDateSerial)
         End If
     Next r
 
@@ -580,7 +528,7 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
             wsOut.Cells(outRow, 5).Value = 0
             wsOut.Cells(outRow, 6).Value = ""
 
-            Call WriteDailyValues(wsOut, outRow, exKeyStr, exRLocKey, dictLocationHits, dictOldHistory, targetColIdx, DATE_COL_FIRST, DATE_COL_LAST, TOTAL_COL)
+            Call WriteHistoryValues(wsOut, outRow, exKeyStr, exRLocKey, dictLocationHits, dictOldHistory, finalDates, DATE_COL_FIRST, TOTAL_COL, businessDateSerial)
         End If
     Next extraKey
 
@@ -588,40 +536,144 @@ Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal busines
     wsOut.Range("A1").AutoFilter
 End Sub
 
-' 「日別実績」の1行分について、日別列(dateColFirst～dateColLast)に実績値を書き込み、
-' 総計列(totalCol)にその合計を書く。targetColIdxの列には今回のdictLocationHitsの値、
-' それ以外の列は退避しておいたdictOldHistory(過去の実績)の値をそのまま引き継ぐ
-Private Sub WriteDailyValues(ByVal wsOut As Worksheet, ByVal outRow As Long, ByVal eLocKey As String, ByVal rLocKey As String, dictLocationHits As Object, dictOldHistory As Object, ByVal targetColIdx As Long, ByVal dateColFirst As Long, ByVal dateColLast As Long, ByVal totalCol As Long)
-    Dim hasOld As Boolean: hasOld = dictOldHistory.Exists(rLocKey)
-    Dim oldVals As Variant
-    If hasOld Then oldVals = dictOldHistory(rLocKey)
+' 「7/31(木)」のような表記の日付見出しを実際の日付に変換する。パースできなければEmptyを返す。
+' ローリング10営業日分の範囲でしか使わないため、今日から半年以上離れる場合のみ前後1年ずらして
+' 年またぎを補正する
+Function ParseHistoryDateHeader(ByVal rawVal As Variant) As Variant
+    ParseHistoryDateHeader = Empty
+    If IsEmpty(rawVal) Then Exit Function
+    Dim s As String: s = Trim(CStr(rawVal))
+    If s = "" Then Exit Function
+    Dim pPos As Long: pPos = InStr(s, "(")
+    If pPos > 1 Then s = Left(s, pPos - 1)
+    If Not IsDate(s) Then Exit Function
+    Dim d As Date: d = CDate(s)
+    Do While d > Date + 200
+        d = DateAdd("yyyy", -1, d)
+    Loop
+    Do While d < Date - 200
+        d = DateAdd("yyyy", 1, d)
+    Loop
+    ParseHistoryDateHeader = d
+End Function
+
+' arr(lo..hi)を昇順(古い日付=小さい値が先)に並べ替える(QuickSort)
+Sub SortLongArrayAsc(arr() As Long, ByVal lo As Long, ByVal hi As Long)
+    If lo >= hi Then Exit Sub
+    Dim pivot As Long: pivot = arr((lo + hi) \ 2)
+    Dim i As Long: i = lo
+    Dim j As Long: j = hi
+    Do While i <= j
+        Do While arr(i) < pivot
+            i = i + 1
+        Loop
+        Do While arr(j) > pivot
+            j = j - 1
+        Loop
+        If i <= j Then
+            Dim tmp As Long: tmp = arr(i)
+            arr(i) = arr(j)
+            arr(j) = tmp
+            i = i + 1
+            j = j - 1
+        End If
+    Loop
+    If lo < j Then Call SortLongArrayAsc(arr, lo, j)
+    If i < hi Then Call SortLongArrayAsc(arr, i, hi)
+End Sub
+
+' 既存シート(wsOldOut、無ければNothing)のkeyColIdx列をキーとして、日付見出し・行データを
+' dictOldHistory(キー→Dictionary(日付シリアル値→値))へ退避し、今回の実施日を加えたうえで、
+' 列に並べる日付一覧(finalDates、古い日付順・最大dateColLast-dateColFirst+1件)を決定する。
+' 読み込み順に関わらず実際の日付の新旧だけで並び順が決まり、同じ日付が既にあれば上書き、
+' 上限を超える分は最も古い日付から削られる
+Sub BuildSortedHistoryDates(ByVal wsOldOut As Worksheet, ByVal keyColIdx As Long, ByVal dateColFirst As Long, ByVal dateColLast As Long, ByVal businessDate As Date, dictOldHistory As Object, finalDates() As Long)
+    Dim existingDates As Object: Set existingDates = CreateObject("Scripting.Dictionary")
+
+    If Not wsOldOut Is Nothing Then
+        Dim oldColDate(dateColFirst To dateColLast) As Variant
+        Dim dc As Long
+        For dc = dateColFirst To dateColLast
+            Dim parsedDate As Variant: parsedDate = ParseHistoryDateHeader(wsOldOut.Cells(1, dc).Value)
+            oldColDate(dc) = parsedDate
+            If Not IsEmpty(parsedDate) Then existingDates(CLng(CDate(parsedDate))) = True
+        Next dc
+
+        Dim lastOutRow As Long: lastOutRow = wsOldOut.Cells(wsOldOut.Rows.Count, 1).End(xlUp).Row
+        If lastOutRow >= 2 Then
+            Dim orow As Long
+            For orow = 2 To lastOutRow
+                Dim oKey As String: oKey = Trim(CStr(wsOldOut.Cells(orow, keyColIdx).Value))
+                If oKey <> "" And Not dictOldHistory.Exists(oKey) Then
+                    Dim dateValMap As Object: Set dateValMap = CreateObject("Scripting.Dictionary")
+                    For dc = dateColFirst To dateColLast
+                        If Not IsEmpty(oldColDate(dc)) Then
+                            Dim cv As Variant: cv = wsOldOut.Cells(orow, dc).Value
+                            If Not IsEmpty(cv) And cv <> "" Then
+                                dateValMap(CLng(CDate(oldColDate(dc)))) = cv
+                            End If
+                        End If
+                    Next dc
+                    dictOldHistory.Add oKey, dateValMap
+                End If
+            Next orow
+        End If
+    End If
+
+    existingDates(CLng(businessDate)) = True
+
+    Dim nd As Long: nd = existingDates.Count
+    Dim allDatesArr() As Long
+    ReDim allDatesArr(1 To nd)
+    Dim di As Long: di = 0
+    Dim dk As Variant
+    For Each dk In existingDates.Keys
+        di = di + 1
+        allDatesArr(di) = CLng(dk)
+    Next dk
+    Call SortLongArrayAsc(allDatesArr, 1, nd)
+
+    Dim maxCols As Long: maxCols = dateColLast - dateColFirst + 1
+    Dim keepFrom As Long: keepFrom = 1
+    If nd > maxCols Then keepFrom = nd - maxCols + 1
+
+    Dim finalCount As Long: finalCount = nd - keepFrom + 1
+    ReDim finalDates(1 To finalCount)
+    Dim fi As Long
+    For fi = 1 To finalCount
+        finalDates(fi) = allDatesArr(keepFrom + fi - 1)
+    Next fi
+End Sub
+
+' finalDates(1..N)の各日付について、hitKeyの今日の実績(dictTodayHits)、または
+' persistKeyの過去実績(dictOldHistory)から値を求めて列に書き込む
+Sub WriteHistoryValues(ByVal wsOut As Worksheet, ByVal outRow As Long, ByVal hitKey As String, ByVal persistKey As String, dictTodayHits As Object, dictOldHistory As Object, finalDates() As Long, ByVal dateColFirst As Long, ByVal totalCol As Long, ByVal businessDateSerial As Long)
+    Dim hasOldMap As Boolean: hasOldMap = dictOldHistory.Exists(persistKey)
+    Dim oldMap As Object
+    If hasOldMap Then Set oldMap = dictOldHistory(persistKey)
 
     Dim totalVal As Double: totalVal = 0
-    Dim dc As Long
-    For dc = dateColFirst To dateColLast
+    Dim n As Long: n = UBound(finalDates)
+    Dim i As Long
+    For i = 1 To n
+        Dim colIdx As Long: colIdx = dateColFirst + i - 1
         Dim cellVal As Variant: cellVal = Empty
-        If dc = targetColIdx Then
+        If finalDates(i) = businessDateSerial Then
             Dim hitVal As Double: hitVal = 0
-            If dictLocationHits.Exists(eLocKey) Then hitVal = dictLocationHits(eLocKey)
+            If dictTodayHits.Exists(hitKey) Then hitVal = dictTodayHits(hitKey)
             cellVal = hitVal
-        ElseIf hasOld Then
-            If Not IsEmpty(oldVals(dc)) And oldVals(dc) <> "" Then cellVal = oldVals(dc)
+        ElseIf hasOldMap Then
+            If oldMap.Exists(finalDates(i)) Then cellVal = oldMap(finalDates(i))
         End If
         If Not IsEmpty(cellVal) Then
-            wsOut.Cells(outRow, dc).Value = cellVal
+            wsOut.Cells(outRow, colIdx).Value = cellVal
             If IsNumeric(cellVal) Then totalVal = totalVal + CDbl(cellVal)
         End If
-    Next dc
+    Next i
     wsOut.Cells(outRow, totalCol).Value = totalVal
 End Sub
 
-' 「日別実績」の日付見出しを「7/20(月)」のような表記で返す
-Private Function FormatHistoryDateHeader(ByVal d As Date) As String
-    Dim wdNames As Variant: wdNames = Array("日", "月", "火", "水", "木", "金", "土")
-    FormatHistoryDateHeader = Format(d, "m/d") & "(" & wdNames(Weekday(d) - 1) & ")"
-End Function
-
-' 「品名実績」シートを更新する(「予測データ」の号機-段-列→品名コード対応を使い、
+' 「品名実績」シートを更新する(号機-段-列→品名コード対応を使い、
 ' その日のロケーション別S71実績を品名コード単位で合算する。同じ品名コードが
 ' 複数ロケーションにまたがっていれば合計する)。
 ' S71実績はロケーション単位でしか記録されないため、「日別実績」はロケーションに
@@ -631,6 +683,7 @@ End Function
 ' ただし「予測データ」に無いロケーションのS71実績(品名不明分)は品名コードに
 ' 割り当てられないため、このシートの合計には含まれない(「日別実績」の合計とは
 ' 一致しないことがある)。
+' 列の並び順は読み込んだ順ではなく、実際の日付の新旧で決める(古い日付ほど左)。
 ' シートは「予測データ」の現在の内容で毎回作り直すが、既存の実績は品名コード単位で
 ' 退避して引き継ぐため、商品が入れ替わっても過去実績が失われることはない
 Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDate As Date)
@@ -669,72 +722,16 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
     Const TOTAL_COL As Long = 17      ' Q列(実績の総計)
     Dim histSheetName As String: histSheetName = "品名実績"
 
-    ' 既存シートがあれば、日付見出しと実績(品名コード→値)を退避しておく
-    Dim wsOut As Worksheet
+    ' 既存シートがあれば、日付見出しと実績(品名コード→日付ごとの値)を退避しておく
+    Dim wsOld As Worksheet
     On Error Resume Next
-    Set wsOut = ThisWorkbook.Sheets(histSheetName)
+    Set wsOld = ThisWorkbook.Sheets(histSheetName)
     On Error GoTo 0
 
-    Dim newHeader As String: newHeader = FormatHistoryDateHeader(businessDate)
-    Dim dateHeaders(DATE_COL_FIRST To DATE_COL_LAST) As String
-    Dim dictOldHistory As Object: Set dictOldHistory = CreateObject("Scripting.Dictionary") ' 品名コード→10列分の実績配列
-    Dim existingDateCount As Long: existingDateCount = 0
-    Dim overwriteColIdx As Long: overwriteColIdx = -1
-
-    If Not wsOut Is Nothing Then
-        Dim dc As Long
-        For dc = DATE_COL_FIRST To DATE_COL_LAST
-            Dim hv As String: hv = Trim(CStr(wsOut.Cells(1, dc).Value))
-            dateHeaders(dc) = hv
-            If hv <> "" Then
-                existingDateCount = existingDateCount + 1
-                If hv = newHeader Then overwriteColIdx = dc
-            End If
-        Next dc
-
-        Dim lastOutRow As Long: lastOutRow = wsOut.Cells(wsOut.Rows.Count, 1).End(xlUp).Row
-        If lastOutRow >= 2 Then
-            Dim orow As Long
-            For orow = 2 To lastOutRow
-                Dim oItemKey As String: oItemKey = Trim(CStr(wsOut.Cells(orow, 1).Value))
-                If oItemKey <> "" And Not dictOldHistory.Exists(oItemKey) Then
-                    Dim vals(DATE_COL_FIRST To DATE_COL_LAST) As Variant
-                    For dc = DATE_COL_FIRST To DATE_COL_LAST
-                        vals(dc) = wsOut.Cells(orow, dc).Value
-                    Next dc
-                    dictOldHistory.Add oItemKey, vals
-                End If
-            Next orow
-        End If
-    End If
-
-    ' 今回の日付を書き込む列を決める(同じ日付があれば上書き、無ければ次の空き列。
-    ' 10列すべて埋まっていれば1列分左にシフトしてP列を空ける)
-    Dim targetColIdx As Long
-    If overwriteColIdx > 0 Then
-        targetColIdx = overwriteColIdx
-    ElseIf existingDateCount < (DATE_COL_LAST - DATE_COL_FIRST + 1) Then
-        targetColIdx = DATE_COL_FIRST + existingDateCount
-    Else
-        Dim shiftCol As Long
-        For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
-            dateHeaders(shiftCol) = dateHeaders(shiftCol + 1)
-        Next shiftCol
-        dateHeaders(DATE_COL_LAST) = ""
-
-        Dim shiftKey As Variant
-        For Each shiftKey In dictOldHistory.Keys
-            Dim shiftVals As Variant: shiftVals = dictOldHistory(shiftKey)
-            For shiftCol = DATE_COL_FIRST To DATE_COL_LAST - 1
-                shiftVals(shiftCol) = shiftVals(shiftCol + 1)
-            Next shiftCol
-            shiftVals(DATE_COL_LAST) = Empty
-            dictOldHistory(shiftKey) = shiftVals
-        Next shiftKey
-
-        targetColIdx = DATE_COL_LAST
-    End If
-    dateHeaders(targetColIdx) = newHeader
+    Dim dictOldHistory As Object: Set dictOldHistory = CreateObject("Scripting.Dictionary") ' 品名コード→Dictionary(日付シリアル値→値)
+    Dim finalDates() As Long
+    Call BuildSortedHistoryDates(wsOld, 1, DATE_COL_FIRST, DATE_COL_LAST, businessDate, dictOldHistory, finalDates)
+    Dim businessDateSerial As Long: businessDateSerial = CLng(businessDate)
 
     ' 「予測データ」の現在の号機-段-列→品名コード対応で、今日のロケーション別実績を
     ' 品名コード単位に合算する(同じ品名コードが複数ロケーションにあれば合計する)
@@ -775,6 +772,7 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
     ThisWorkbook.Sheets(histSheetName).Delete
     On Error GoTo 0
 
+    Dim wsOut As Worksheet
     Dim wsPanel As Worksheet
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
@@ -789,9 +787,10 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
     wsOut.Columns("A:A").NumberFormat = "@" ' コード(先頭ゼロ落ち防止)
 
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 6)).Value = Array("コード", "品名", "ロケ分類", "号機数", "予測回数", "")
-    For dc = DATE_COL_FIRST To DATE_COL_LAST
-        wsOut.Cells(1, dc).Value = dateHeaders(dc)
-    Next dc
+    Dim dNo As Long
+    For dNo = 1 To UBound(finalDates)
+        wsOut.Cells(1, DATE_COL_FIRST + dNo - 1).Value = FormatHistoryDateHeader(CDate(finalDates(dNo)))
+    Next dNo
     wsOut.Cells(1, TOTAL_COL).Value = "総計"
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Font.Bold = True
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, TOTAL_COL)).Interior.Color = RGB(220, 230, 255)
@@ -807,7 +806,7 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
         wsOut.Cells(outRow, 4).Value = dictItemLocCount(ik)
         wsOut.Cells(outRow, 5).Value = dictItemForecastSum(ik)
 
-        Call WriteDailyValues(wsOut, outRow, ik, ik, dictItemHitsToday, dictOldHistory, targetColIdx, DATE_COL_FIRST, DATE_COL_LAST, TOTAL_COL)
+        Call WriteHistoryValues(wsOut, outRow, ik, ik, dictItemHitsToday, dictOldHistory, finalDates, DATE_COL_FIRST, TOTAL_COL, businessDateSerial)
     Next itemKeyV
 
     wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(outRow, TOTAL_COL)).Columns.AutoFit
