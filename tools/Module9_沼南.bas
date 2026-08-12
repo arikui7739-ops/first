@@ -353,6 +353,9 @@ End Sub
 ' (既存のボタン・図形と重ならないよう、一番下にあるものの少し下に順番に配置する)
 Sub EnsureRatioChartButtons()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+    Call MigrateRenamedButtons
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
@@ -401,6 +404,8 @@ End Sub
 ' 「予測データ」を再取込みして行が増減しても、過去の日別実績が失われることはない
 Private Sub UpdateDailyLocationHistory(dictLocationHits As Object, ByVal businessDate As Date)
     Dim wsData As Worksheet
+    Call MigrateRenamedSheets
+
     On Error Resume Next
     Set wsData = ThisWorkbook.Sheets("予測データ")
     On Error GoTo 0

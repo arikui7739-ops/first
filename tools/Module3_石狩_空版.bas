@@ -1718,6 +1718,9 @@ End Sub
 ' 「操作パネル」シートに在庫データ取込ボタンが無ければ追加する
 Sub EnsureItemAttributeImportButton()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+    Call MigrateRenamedButtons
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
@@ -1766,6 +1769,9 @@ End Sub
 ' ブックの先頭シートとして配置し、以降このシートの左隣に各種出力シート(AB対面分散など)が追加されていく。
 Sub EnsureOperationPanelSheet()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+    Call MigrateRenamedButtons
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
@@ -1861,6 +1867,9 @@ End Sub
 ' (新しいボタンが追加されるたびに1列で下に伸び続けるのを防ぐため、名前が存在するものだけを詰めて配置する)
 Sub LayoutPanelButtons()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+    Call MigrateRenamedButtons
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
@@ -1895,6 +1904,8 @@ End Sub
 
 Sub EnsureKPISheet()
     Dim wsKPI As Worksheet
+    Call MigrateRenamedSheets
+
     On Error Resume Next
     Set wsKPI = ThisWorkbook.Sheets("KPI")
     On Error GoTo 0
@@ -2383,4 +2394,81 @@ Sub EnsureSortSheetsButton()
     End If
 
     Call LayoutPanelButtons
+End Sub
+
+' ----------------------------------------------------
+' 過去のバージョンで使っていたシート名が残っている場合、蓄積データ(日別実績・
+' KPIの履歴など)を失わないよう、新しいシート名にリネームして引き継ぐ。
+' 新しい名前のシートがまだ存在しない場合のみ実施する(両方あるときは触らない)。
+' ----------------------------------------------------
+Sub MigrateRenamedSheets()
+    Dim pairs As Variant
+    pairs = Array( _
+        Array("在庫商品マスタ", "在庫データ"), _
+        Array("予測構成比グラフ", "予測グラフ"), _
+        Array("実績構成比グラフ", "実績グラフ"), _
+        Array("同時ピッキング交換指示書", "Cバラ交換"), _
+        Array("AB編成動線最適化", "AB対面分散"), _
+        Array("同号機分散ロケーション変更指示", "同号機分散"), _
+        Array("ロケ変指示", "号機間バランス"), _
+        Array("ゾーン間入替候補", "ゾーンバランス"), _
+        Array("日別ロケーション実績", "日別実績"), _
+        Array("AB編成KPI", "KPI"), _
+        Array("同時ピッキング改善KPI", "CバラKPI") _
+    )
+
+    Dim i As Long
+    For i = LBound(pairs) To UBound(pairs)
+        Dim oldName As String: oldName = pairs(i)(0)
+        Dim newName As String: newName = pairs(i)(1)
+        Dim wsOld As Worksheet, wsNew As Worksheet
+        On Error Resume Next
+        Set wsOld = ThisWorkbook.Sheets(oldName)
+        Set wsNew = ThisWorkbook.Sheets(newName)
+        On Error GoTo 0
+        If Not wsOld Is Nothing And wsNew Is Nothing Then
+            wsOld.Name = newName
+        End If
+        Set wsOld = Nothing
+        Set wsNew = Nothing
+    Next i
+End Sub
+
+' 過去のバージョンで使っていたボタン名が「操作パネル」に残っている場合、二重に
+' ボタンが作られないよう、新しいボタン名・表示文言にリネームして引き継ぐ。
+' 新しい名前のボタンがまだ無い場合のみ実施する(両方あるときは触らない)。
+Sub MigrateRenamedButtons()
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If wsPanel Is Nothing Then Exit Sub
+
+    Dim pairs As Variant
+    pairs = Array( _
+        Array("ロケ変指示ボタン", "号機間バランスボタン", "号機間バランスを作成"), _
+        Array("ゾーン間入替候補ボタン", "ゾーンバランスボタン", "ゾーンバランス作成"), _
+        Array("在庫商品マスタ取込ボタン", "在庫データ取込ボタン", "在庫データを取り込む"), _
+        Array("AB編成動線最適化ボタン", "AB対面分散ボタン", "AB対面分散を実行"), _
+        Array("予測構成比グラフボタン", "予測グラフボタン", "予測グラフを作成"), _
+        Array("実績構成比グラフボタン", "実績グラフボタン", "実績グラフを作成") _
+    )
+
+    Dim i As Long
+    For i = LBound(pairs) To UBound(pairs)
+        Dim oldName As String: oldName = pairs(i)(0)
+        Dim newName As String: newName = pairs(i)(1)
+        Dim newCaption As String: newCaption = pairs(i)(2)
+        Dim shpOld As Shape, shpNew As Shape
+        On Error Resume Next
+        Set shpOld = wsPanel.Shapes(oldName)
+        Set shpNew = wsPanel.Shapes(newName)
+        On Error GoTo 0
+        If Not shpOld Is Nothing And shpNew Is Nothing Then
+            shpOld.Name = newName
+            shpOld.Characters.Text = newCaption
+        End If
+        Set shpOld = Nothing
+        Set shpNew = Nothing
+    Next i
 End Sub

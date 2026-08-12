@@ -466,6 +466,8 @@ End Sub
 ' (既存のボタン・図形と重ならないよう、Module3の共通レイアウト処理で2列に並び替える)
 Sub EnsureSwapCorrelationButton()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
@@ -492,6 +494,8 @@ End Sub
 ' 「CバラKPI」シートが無ければ自動生成する
 Sub EnsureModule1KPISheet()
     Dim wsKPI As Worksheet
+    Call MigrateRenamedSheets
+
     On Error Resume Next
     Set wsKPI = ThisWorkbook.Sheets("CバラKPI")
     On Error GoTo 0

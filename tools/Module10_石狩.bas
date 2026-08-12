@@ -444,6 +444,9 @@ End Function
 ' (既存のボタン・図形と重ならないよう、一番下にあるものの少し下に配置する)
 Sub EnsureRelocationPlanButton()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+    Call MigrateRenamedButtons
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
@@ -847,6 +850,9 @@ End Sub
 ' 「操作パネル」シートにゾーンバランス作成ボタンが無ければ追加する
 Sub EnsureZoneRebalanceButton()
     Dim wsPanel As Worksheet
+    Call MigrateRenamedSheets
+    Call MigrateRenamedButtons
+
     On Error Resume Next
     Set wsPanel = ThisWorkbook.Sheets("操作パネル")
     On Error GoTo 0
