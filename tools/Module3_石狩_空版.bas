@@ -1874,7 +1874,7 @@ Sub LayoutPanelButtons()
     Dim baseTop As Double: baseTop = wsPanel.Range("H4").Top
 
     Dim orderNames As Variant
-    orderNames = Array("AB対面分散ボタン", "予測データ取込ボタン", "在庫データ取込ボタン", "予測グラフボタン", "実績グラフボタン", "号機間バランスボタン", "同時ピッキング改善指示ボタン", "ゾーンバランスボタン")
+    orderNames = Array("AB対面分散ボタン", "予測データ取込ボタン", "在庫データ取込ボタン", "予測グラフボタン", "実績グラフボタン", "号機間バランスボタン", "同時ピッキング改善指示ボタン", "ゾーンバランスボタン", "シート並び替えボタン")
 
     Dim idx As Long, placedCount As Long: placedCount = 0
     For idx = LBound(orderNames) To UBound(orderNames)
@@ -2325,3 +2325,62 @@ Function GetLocCode3(dictLocCode As Object, ByVal mach As Long, locKey As String
         GetLocCode3 = ""
     End If
 End Function
+
+' ----------------------------------------------------
+' シートタブの並び順を、決められた順序(予測データ→在庫データ→予測グラフ→
+' 実績グラフ→Cバラ交換→AB対面分散→同号機分散→号機間バランス→
+' ゾーンバランス→操作パネル→設定→日別実績→KPI→CバラKPI)に揃える。
+' このブックに存在しないシートは読み飛ばす(バンドルによって作成される
+' シートが異なるため)。この一覧に無いシートの並び順は変更しない。
+' ----------------------------------------------------
+Sub SortKnownSheets()
+    Call EnsureSortSheetsButton
+
+    Dim orderNames As Variant
+    orderNames = Array("予測データ", "在庫データ", "予測グラフ", "実績グラフ", "Cバラ交換", "AB対面分散", "同号機分散", "号機間バランス", "ゾーンバランス", "操作パネル", "設定", "日別実績", "KPI", "CバラKPI")
+
+    Dim prevSheet As Worksheet: Set prevSheet = Nothing
+    Dim idx As Long
+    For idx = LBound(orderNames) To UBound(orderNames)
+        Dim ws As Worksheet
+        On Error Resume Next
+        Set ws = ThisWorkbook.Sheets(CStr(orderNames(idx)))
+        On Error GoTo 0
+        If Not ws Is Nothing Then
+            If prevSheet Is Nothing Then
+                ws.Move Before:=ThisWorkbook.Sheets(1)
+            Else
+                ws.Move After:=prevSheet
+            End If
+            Set prevSheet = ws
+        End If
+        Set ws = Nothing
+    Next idx
+
+    MsgBox "シートの並び順を整えました。", vbInformation
+End Sub
+
+' 「操作パネル」シートにシート並び替えボタンが無ければ追加する
+Sub EnsureSortSheetsButton()
+    Dim wsPanel As Worksheet
+    On Error Resume Next
+    Set wsPanel = ThisWorkbook.Sheets("操作パネル")
+    On Error GoTo 0
+    If wsPanel Is Nothing Then Exit Sub
+
+    Dim existing As Shape
+    On Error Resume Next
+    Set existing = wsPanel.Shapes("シート並び替えボタン")
+    On Error GoTo 0
+    If existing Is Nothing Then
+        Dim btn As Button
+        Set btn = wsPanel.Buttons.Add(wsPanel.Range("B28").Left, wsPanel.Range("B28").Top, 220, 36)
+        btn.Name = "シート並び替えボタン"
+        btn.OnAction = "SortKnownSheets"
+        btn.Characters.Text = "シート並び替え"
+        btn.Font.Size = 12
+        btn.Font.Bold = True
+    End If
+
+    Call LayoutPanelButtons
+End Sub
