@@ -209,6 +209,15 @@ Sub CreateRelocationPlan()
         Exit Sub
     End If
 
+    ' 出力の「構成比」欄は、目標比較の対象機番だけでなく全ロケーション(Cバラ・拡張X・
+    ' 目標未設定機番を含む)の実績(予測)合計を分母にする(スワップの候補選定自体は
+    ' 上のtargetedHitTotal・targetRatioSumで正規化した値を使うため、ここでの変更の影響を受けない)
+    Dim grandTotal As Double: grandTotal = 0
+    Dim gtKey As Variant
+    For Each gtKey In actualCountByMach.Keys
+        grandTotal = grandTotal + actualCountByMach(gtKey)
+    Next gtKey
+
     ' 入替候補の選定(目標構成比を最も上回っている機番の高頻度ロケーションを、同じ段の中から
     ' 最も目標構成比を下回っている機番の未使用ロケーションと入れ替える、を繰り返す)
     Dim outArr() As Variant
@@ -275,15 +284,15 @@ Sub CreateRelocationPlan()
         Else
             Dim srcMachV As Long: srcMachV = rowMach(srcRow)
             Dim dstMachV As Long: dstMachV = rowMach(partnerRow)
-            Dim srcRatioBefore As Double: srcRatioBefore = GetMachRatio(srcMachV, actualCountByMach, targetedHitTotal)
-            Dim dstRatioBefore As Double: dstRatioBefore = GetMachRatio(dstMachV, actualCountByMach, targetedHitTotal)
+            Dim srcRatioBefore As Double: srcRatioBefore = GetMachRatio(srcMachV, actualCountByMach, grandTotal)
+            Dim dstRatioBefore As Double: dstRatioBefore = GetMachRatio(dstMachV, actualCountByMach, grandTotal)
 
             ' 実績(予測)集計を更新する
             actualCountByMach(CStr(srcMachV)) = actualCountByMach(CStr(srcMachV)) - rowCnt(srcRow) + rowCnt(partnerRow)
             actualCountByMach(CStr(dstMachV)) = actualCountByMach(CStr(dstMachV)) - rowCnt(partnerRow) + rowCnt(srcRow)
 
-            Dim srcRatioAfter As Double: srcRatioAfter = GetMachRatio(srcMachV, actualCountByMach, targetedHitTotal)
-            Dim dstRatioAfter As Double: dstRatioAfter = GetMachRatio(dstMachV, actualCountByMach, targetedHitTotal)
+            Dim srcRatioAfter As Double: srcRatioAfter = GetMachRatio(srcMachV, actualCountByMach, grandTotal)
+            Dim dstRatioAfter As Double: dstRatioAfter = GetMachRatio(dstMachV, actualCountByMach, grandTotal)
 
             rowUsed(srcRow) = True
             rowUsed(partnerRow) = True
@@ -337,7 +346,7 @@ Sub CreateRelocationPlan()
     wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
     wsOut.Range("A2:J2").Merge
-    wsOut.Cells(2, 1).Value = "「設定」シートの■機番別目標構成比に近づけるよう、目標超過機番の高頻度ロケーションと目標未達機番のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「機番-段-列」の表記です(AB対面分散と同じ)。"
+    wsOut.Cells(2, 1).Value = "「設定」シートの■機番別目標構成比に近づけるよう、目標超過機番の高頻度ロケーションと目標未達機番のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「機番-段-列」の表記です(AB対面分散と同じ)。右端の構成比は全ロケーション(Cバラ・拡張X含む)の合計に対する割合です。"
     wsOut.Cells(2, 1).HorizontalAlignment = xlLeft
 
     wsOut.Range("A4:J4").Value = Array("【移動元品】(交換品コード)", "移動元品コード", "移動元ロケーション", "移動元予測回数", "交換方向", "【移動先品】(交換対象品)", "移動先品コード", "移動先ロケーション", "移動先予測回数", "構成比(移動元/移動先:変更前→変更後)")
