@@ -12,7 +12,7 @@ Option Explicit
 ' 61～73はC01、81～93はC02、それ以外はXという沼南の実際のラック配置に基づく固定ルール)。
 ' 「設定」シートに目標構成比が入力されていれば、実績/予測の比率と並べて目標比率も折れ線で比較できるようにする。
 ' データ表にはCバラ・拡張も含めるが、グラフにはABブロック内の号機のみを表示する(Cバラ・拡張はグラフの対象外)。
-' グラフの縦軸目盛りは予測・実績のグラフ間、また石狩のグラフとも見比べやすいよう固定スケール(既定は±5%・1%刻み)にし、
+' グラフの縦軸目盛りは予測・実績のグラフ間、また石狩のグラフとも見比べやすいよう固定スケール(既定は±4%・1%刻み)にし、
 ' 実データがそれを超える場合のみ切り上げて広げる。
 ' 「実績グラフ」の作成と同時に、「日別実績」シート(品名コード・ロケ分類・品名・
 ' ロケーション・予測回数ごとの日別実績を並べた履歴表)も更新する。日別列はG～Pの最大10列で、
@@ -20,7 +20,7 @@ Option Explicit
 ' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
 ' ----------------------------------------------------
 
-Const AXIS_DEFAULT_MAX As Double = 0.05 ' グラフ縦軸の既定スケール(±5%)
+Const AXIS_DEFAULT_MAX As Double = 0.04 ' グラフ縦軸の既定スケール(±4%)
 Const AXIS_UNIT As Double = 0.01 ' グラフ縦軸の目盛り間隔(1%)
 
 Sub CreateForecastRatioChart()
@@ -338,7 +338,7 @@ Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As 
         End If
     End With
 
-    ' 縦軸の目盛りを固定スケールに統一する(既定は±5%・1%刻み。実データがこれを超える場合のみ1%単位で切り上げて広げる。
+    ' 縦軸の目盛りを固定スケールに統一する(既定は±4%・1%刻み。実データがこれを超える場合のみ1%単位で切り上げて広げる。
     ' 予測・実績のグラフ間、石狩のグラフとも同じ基準にすることで見比べやすくする)
     Dim axisMax As Double: axisMax = AXIS_DEFAULT_MAX
     If maxAbsVal > axisMax Then axisMax = Application.WorksheetFunction.RoundUp(maxAbsVal / AXIS_UNIT, 0) * AXIS_UNIT
