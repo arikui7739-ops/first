@@ -211,14 +211,25 @@ Sub CreateRelocationPlan()
         Exit Sub
     End If
 
-    ' 出力の「構成比」欄は、目標比較の対象号機だけでなく全ロケーション(Cバラ・拡張X・
-    ' 目標未設定号機を含む)の実績(予測)合計を分母にする(スワップの候補選定自体は
-    ' 上のtargetedHitTotal・targetRatioSumで正規化した値を使うため、ここでの変更の影響を受けない)
+    ' 出力の「構成比」欄は、除外設定の影響を受けないよう「予測グラフ」(Module9)と同じ集計方法で
+    ' 分母(grandTotal)を求める。「予測データ」の全行(ゾーン列が空でない行)の投入回数_予測を
+    ' 除外設定を反映せずそのまま合計する(スワップの候補選定自体は、上のtargetedHitTotal・
+    ' targetRatioSumで正規化した除外設定込みの値を使うため、ここでの変更の影響を受けない)
+    Dim zoneColIdxForTotal As Long: zoneColIdxForTotal = -1
+    For hc = 1 To lastCol
+        If Trim(CStr(wsData.Cells(HEADER_ROW, hc).Value)) = "ゾーン" Then zoneColIdxForTotal = hc
+    Next hc
     Dim grandTotal As Double: grandTotal = 0
-    Dim gtKey As Variant
-    For Each gtKey In actualCountByMach.Keys
-        grandTotal = grandTotal + actualCountByMach(gtKey)
-    Next gtKey
+    Dim gr As Long
+    For gr = HEADER_ROW + 1 To lastRow
+        If zoneColIdxForTotal > 0 Then
+            If Trim(CStr(wsData.Cells(gr, zoneColIdxForTotal).Value)) <> "" Then
+                grandTotal = grandTotal + Val(wsData.Cells(gr, cntColIdx).Value)
+            End If
+        ElseIf IsNumeric(wsData.Cells(gr, machColIdx).Value) Then
+            grandTotal = grandTotal + Val(wsData.Cells(gr, cntColIdx).Value)
+        End If
+    Next gr
 
     ' 入替候補の選定(目標構成比を最も上回っている号機の高頻度ロケーションを、同じ段の中から
     ' 最も目標構成比を下回っている号機の未使用ロケーションと入れ替える、を繰り返す)
