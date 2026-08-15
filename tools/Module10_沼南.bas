@@ -569,10 +569,12 @@ Sub CreateZoneRebalancePlan()
         Exit Sub
     End If
 
-    ' 「品名実績」の月曜列があれば、品名コードごとの月曜実績を読み込む
+    ' 「品名実績」の対象曜日列があれば、品名コードごとの実績を読み込む
     ' (S71実績はロケーション単位でしか記録されないため、「日別実績」はロケーション基準で
     ' 商品が移動すると過去実績が古い商品のまま残ってしまう。「品名実績」は品名コード単位で
-    ' 実績を蓄積しているため、商品が移動していても正しくその商品の実績を参照できる)
+    ' 実績を蓄積しているため、商品が移動していても正しくその商品の実績を参照できる。
+    ' 対象曜日は「設定」シートの■ゾーンバランス確認曜日で変更できる(既定は月))
+    Dim targetWeekday As String: targetWeekday = GetZoneBalanceWeekday()
     Dim dictMondayActual As Object: Set dictMondayActual = CreateObject("Scripting.Dictionary")
     Dim hasMondayCol As Boolean: hasMondayCol = False
     Dim wsHist As Worksheet
@@ -585,7 +587,7 @@ Sub CreateZoneRebalancePlan()
         Dim mondayCol As Long: mondayCol = -1
         Dim hdc As Long
         For hdc = HIST_DATE_COL_FIRST To HIST_DATE_COL_LAST
-            If InStr(CStr(wsHist.Cells(1, hdc).Value), "(月)") > 0 Then mondayCol = hdc
+            If InStr(CStr(wsHist.Cells(1, hdc).Value), "(" & targetWeekday & ")") > 0 Then mondayCol = hdc
         Next hdc
         If mondayCol > 0 Then
             hasMondayCol = True
@@ -799,7 +801,7 @@ Sub CreateZoneRebalancePlan()
     wsOut.Range("A1:D1").Font.Bold = True
     wsOut.Range("A1:D4").Columns.AutoFit
     If Not hasMondayCol Then
-        wsOut.Range("A5").Value = "※品名実績の月曜実績が無いため、予測データの曜日平均で代用しています"
+        wsOut.Range("A5").Value = "※品名実績の" & targetWeekday & "曜実績が無いため、予測データの曜日平均で代用しています"
     End If
 
     Const TABLE_HEADER_ROW As Long = 7
@@ -899,3 +901,16 @@ Sub EnsureZoneRebalanceButton()
 
     Call LayoutPanelButtons
 End Sub
+
+' 「設定」シートの「ゾーンバランス確認曜日」(L13)を読み込む。
+' 未入力・不正な値なら既定値「月」を使う
+Private Function GetZoneBalanceWeekday() As String
+    GetZoneBalanceWeekday = "月"
+    Dim wsSet As Worksheet
+    On Error Resume Next
+    Set wsSet = ThisWorkbook.Sheets("設定")
+    On Error GoTo 0
+    If wsSet Is Nothing Then Exit Function
+    Dim v As String: v = Trim(CStr(wsSet.Range("L13").Value))
+    If Len(v) = 1 And InStr("月火水木金土日", v) > 0 Then GetZoneBalanceWeekday = v
+End Function

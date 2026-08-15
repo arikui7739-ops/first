@@ -2063,6 +2063,7 @@ Sub EnsureExclusionSettingsSheet()
         ' 属性考慮の設定行(K9～K12)自体が無いことがあり、その場合はここで追加で補完する)
         Call EnsureAttrWeightSettings(wsSet)
         Call EnsureAttrCheckBox(wsSet)
+        Call EnsureZoneWeekdaySetting(wsSet)
         Exit Sub
     End If
 
@@ -2097,7 +2098,8 @@ Sub EnsureExclusionSettingsSheet()
         "号機間バランス(Module10)はこの目標値が入力されていないと作成できません。" & _
         "合計が100%になっていなくても、入力した機番どうしの相対バランスとして扱われる(Cバラ等AB以外への出荷分があっても問題ない)。" & _
         "ゾーンバランスは①②③の除外設定のみ共有し、この目標構成比は使いません" & _
-        "(AB=1～46号機・Cバラ=51～68号機・X拡張=70号機以上の3ゾーンで、出荷回数順に構成比92%・7%・1%を目指します)。" & _
+        "(AB=1～46号機・Cバラ=51～68号機・X拡張=70号機以上の3ゾーンで、出荷回数順に構成比92%・7%・1%を目指します。" & _
+        "出荷回数のランキングに使う「品名実績」の曜日はK14/L14の■ゾーンバランス確認曜日で変更できます、既定は月曜)。" & _
         "⑥属性考慮係数(L9～L11):在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込んだ場合のみ有効。" & _
         "入替候補の選定時、入替先号機の同カテゴリー品の集中度・サイズ差・重量差をスコアに軽く反映する(値が大きいほど強く反映)。" & _
         "各表の5行目以降に追加・削除して使ってください。"
@@ -2171,6 +2173,20 @@ Sub EnsureExclusionSettingsSheet()
     Next dti
 
     Call EnsureAttrCheckBox(wsSet)
+    Call EnsureZoneWeekdaySetting(wsSet)
+End Sub
+
+' 「設定」シートに「ゾーンバランス確認曜日」(K14/L14)が無ければ追加する
+Sub EnsureZoneWeekdaySetting(wsSet As Worksheet)
+    If Trim(CStr(wsSet.Range("K14").Value)) <> "" Then Exit Sub
+
+    wsSet.Range("K14").Value = "ゾーンバランス確認曜日"
+    wsSet.Range("K14").Font.Bold = True
+    wsSet.Range("L14").Value = "月" ' ゾーンバランスの出荷回数ランキングに使う「品名実績」の曜日列(月・火・水・木・金・土・日)
+    With wsSet.Range("L14").Validation
+        .Delete
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="月,火,水,木,金,土,日"
+    End With
 End Sub
 
 ' カテゴリー重み・サイズ重み・重量重み・カテゴリー粒度(K9:L12)が無ければ追加する
