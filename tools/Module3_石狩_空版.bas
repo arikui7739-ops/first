@@ -1836,8 +1836,9 @@ Sub EnsureOperationPanelSheet()
         "AB間口数・機番別目標構成比などは「設定」シートで変更できます(シートが無ければ実行時に自動作成されます)。" & _
         "機番別目標構成比を入力すると、入替提案が奇数偶数バランスより目標比率への近さを優先します" & _
         "(ゾーンバランスは除外設定のみ共有し、機番別目標構成比は使いません)。「同時ピッキング改善指示」実行時の" & _
-        "実績は「KPI」シートの平均無駄歩行スコア・交換候補件数として記録されます。シートタブの並び順が" & _
-        "バラバラになったときは「シート並び替え」ボタンで整えられます。"
+        "実績は「KPI」シートの平均無駄歩行スコア・交換候補件数として記録されます。「KPI」シートの各指標は、" & _
+        "判定基準(合格/注意/不合格)に応じて自動的に緑・黄・赤に色分けされます(基準は「KPI」シート右側に一覧表示)。" & _
+        "シートタブの並び順がバラバラになったときは「シート並び替え」ボタンで整えられます。"
     wsPanel.Range("B4").Value = panelDesc
     wsPanel.Range("B4").Font.Size = 11
     wsPanel.Range("B4").WrapText = True
@@ -1950,6 +1951,10 @@ Sub EnsureKPISheet()
     End If
 
     Call MergeSwapKPIIntoMainKPI
+
+    ' 判定基準の凡例・条件付き書式(緑=合格/黄=注意/赤=不合格)は、シートが既にあった場合も
+    ' 常に最新の内容に更新する(過去に作成済みのKPIシートにも遡って反映されるように)
+    Call ApplyKPIJudgeCriteria(wsKPI, True)
 End Sub
 
 ' 「CバラKPI」または旧名「同時ピッキング改善KPI」シートに実施日ごとの記録が
@@ -2046,6 +2051,82 @@ Sub LogKPI(reportDate As Date, abTheoreticalRatio As Variant, abActualRatio As V
     wsKPI.Cells(targetRow, 8).Value = balanceScoreAfterSM
 End Sub
 
+' 「KPI」シートの各指標に判定基準(合格/注意/不合格)を条件付き書式で色分けし(緑=合格/黄=注意/赤=不合格)、
+' 基準の一覧をシート右側(L:N列、データ列とは重ならない位置)に書き出す。
+' EnsureKPISheetから毎回呼び出し、シートが既にあった場合も含めて常に最新の基準に更新する。
+' includeSwapMetrics:True(石狩空版)ならI列(平均無駄歩行スコア、同時ピッキング改善指示の実績)の基準も追加する
+Sub ApplyKPIJudgeCriteria(wsKPI As Worksheet, includeSwapMetrics As Boolean)
+    wsKPI.Columns("L:L").ColumnWidth = 28
+    wsKPI.Columns("M:M").ColumnWidth = 3
+    wsKPI.Columns("N:N").ColumnWidth = 46
+
+    wsKPI.Range("L1:N1").Merge
+    wsKPI.Range("L1").Value = "■KPI判定基準(緑=合格・黄=注意・赤=不合格)"
+    wsKPI.Range("L1").Font.Bold = True
+    wsKPI.Range("L1").HorizontalAlignment = xlLeft
+
+    Dim legendRow As Long: legendRow = 2
+    wsKPI.Cells(legendRow, 12).Value = "AB実績回数比率"
+    wsKPI.Cells(legendRow, 13).Value = "→"
+    wsKPI.Cells(legendRow, 14).Value = "上限回数比率との差が2%以内を合格、5%以上を不合格"
+    legendRow = legendRow + 1
+    wsKPI.Cells(legendRow, 12).Value = "AB同時ピッキング回避スコア"
+    wsKPI.Cells(legendRow, 13).Value = "→"
+    wsKPI.Cells(legendRow, 14).Value = "60点以上を合格、50以下を不合格"
+    legendRow = legendRow + 1
+    wsKPI.Cells(legendRow, 12).Value = "均衡化スコア(変更前・変更後)"
+    wsKPI.Cells(legendRow, 13).Value = "→"
+    wsKPI.Cells(legendRow, 14).Value = "99以上を合格、98以下を不合格"
+    legendRow = legendRow + 1
+    wsKPI.Cells(legendRow, 12).Value = "同号機分散均衡化スコア(変更前・変更後)"
+    wsKPI.Cells(legendRow, 13).Value = "→"
+    wsKPI.Cells(legendRow, 14).Value = "99以上を合格、98以下を不合格"
+    legendRow = legendRow + 1
+    If includeSwapMetrics Then
+        wsKPI.Cells(legendRow, 12).Value = "平均無駄歩行スコア"
+        wsKPI.Cells(legendRow, 13).Value = "→"
+        wsKPI.Cells(legendRow, 14).Value = "3.5以下を合格、4.5以上を不合格"
+        legendRow = legendRow + 1
+    End If
+
+    ' 実行のたびに条件付き書式が重複登録されないよう、対象列を一度クリアしてから設定し直す
+    wsKPI.Range("C4:C5000").FormatConditions.Delete
+    wsKPI.Range("D4:D5000").FormatConditions.Delete
+    wsKPI.Range("E4:F5000").FormatConditions.Delete
+    wsKPI.Range("G4:H5000").FormatConditions.Delete
+
+    Call AddKPITrafficLight(wsKPI.Range("C4:C5000"), _
+        "=AND(C4<>"""",ABS(C4-$B4)<=0.02)", _
+        "=AND(C4<>"""",ABS(C4-$B4)>=0.05)", _
+        "=AND(C4<>"""",ABS(C4-$B4)>0.02,ABS(C4-$B4)<0.05)")
+    Call AddKPITrafficLight(wsKPI.Range("D4:D5000"), _
+        "=AND(D4<>"""",D4>=60)", "=AND(D4<>"""",D4<=50)", "=AND(D4<>"""",D4>50,D4<60)")
+    Call AddKPITrafficLight(wsKPI.Range("E4:F5000"), _
+        "=AND(E4<>"""",E4>=99)", "=AND(E4<>"""",E4<=98)", "=AND(E4<>"""",E4>98,E4<99)")
+    Call AddKPITrafficLight(wsKPI.Range("G4:H5000"), _
+        "=AND(G4<>"""",G4>=99)", "=AND(G4<>"""",G4<=98)", "=AND(G4<>"""",G4>98,G4<99)")
+
+    If includeSwapMetrics Then
+        wsKPI.Range("I4:I5000").FormatConditions.Delete
+        Call AddKPITrafficLight(wsKPI.Range("I4:I5000"), _
+            "=AND(I4<>"""",I4<=3.5)", "=AND(I4<>"""",I4>=4.5)", "=AND(I4<>"""",I4>3.5,I4<4.5)")
+    End If
+End Sub
+
+' 指定範囲に、数式条件の条件付き書式を3本(緑=合格/赤=不合格/黄=それ以外)まとめて追加する
+Sub AddKPITrafficLight(rng As Range, formulaGreen As String, formulaRed As String, formulaYellow As String)
+    Dim fc As FormatCondition
+    Set fc = rng.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaGreen)
+    fc.Interior.Color = RGB(198, 239, 206)
+    fc.Font.Color = RGB(0, 97, 0)
+    Set fc = rng.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaRed)
+    fc.Interior.Color = RGB(255, 199, 206)
+    fc.Font.Color = RGB(156, 0, 6)
+    Set fc = rng.FormatConditions.Add(Type:=xlExpression, Formula1:=formulaYellow)
+    fc.Interior.Color = RGB(255, 235, 156)
+    fc.Font.Color = RGB(156, 101, 0)
+End Sub
+
 ' ----------------------------------------------------
 ' 拠点カスタマイズ設定(除外機番・除外ロケーション)
 ' ----------------------------------------------------
@@ -2102,7 +2183,10 @@ Sub EnsureExclusionSettingsSheet()
         "出荷回数のランキングに使う「品名実績」の曜日はK14/L14の■ゾーンバランス確認曜日で変更できます、既定は月曜)。" & _
         "⑥属性考慮係数(L9～L11):在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込んだ場合のみ有効。" & _
         "入替候補の選定時、入替先号機の同カテゴリー品の集中度・サイズ差・重量差をスコアに軽く反映する(値が大きいほど強く反映)。" & _
-        "各表の5行目以降に追加・削除して使ってください。"
+        "各表の5行目以降に追加・削除して使ってください。" & _
+        "⑦KPI判定基準:「KPI」シートに記録される各指標(AB実績回数比率・AB同時ピッキング回避スコア・均衡化スコア・" & _
+        "同号機分散均衡化スコア・平均無駄歩行スコア)は、あらかじめ決められた基準に応じて緑(合格)・黄(注意)・" & _
+        "赤(不合格)に自動で色分けされます(基準は「KPI」シート右側に一覧表示、この「設定」シートでは変更できません)。"
     wsSet.Range("A1").Font.Bold = True
     wsSet.Range("A1").WrapText = True
     wsSet.Range("A1").VerticalAlignment = xlTop
