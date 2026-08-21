@@ -617,6 +617,7 @@ Sub CreateZoneRebalancePlan()
 
     Dim rMach() As Long, rDan() As Long, rCol() As Long
     Dim rCode() As String, rName() As String, rCnt() As Double, rZone() As String
+    Dim rForecast() As Double
     ReDim rMach(1 To n)
     ReDim rDan(1 To n)
     ReDim rCol(1 To n)
@@ -624,6 +625,7 @@ Sub CreateZoneRebalancePlan()
     ReDim rName(1 To n)
     ReDim rCnt(1 To n)
     ReDim rZone(1 To n)
+    ReDim rForecast(1 To n)
     Dim m As Long: m = 0
 
     Dim i As Long
@@ -668,6 +670,8 @@ Sub CreateZoneRebalancePlan()
                             rName(m) = IIf(itemNameColIdx > 0, Trim(CStr(dataArr(i, itemNameColIdx))), "")
                             rCnt(m) = cntVal
                             rZone(m) = zone
+                            ' 出荷回数(rCnt)は実績優先だが、予測回数は「予測データ」の値を常に別途保持して並べて表示する
+                            rForecast(m) = IIf(wdAvgColIdx > 0, Val(dataArr(i, wdAvgColIdx)), 0)
                         End If
                     End If
                 End If
@@ -731,7 +735,7 @@ Sub CreateZoneRebalancePlan()
     Next rank
 
     Dim outRows As Collection: Set outRows = New Collection
-    Call AppendZonePairs(outRows, colC2AB, colAB2C, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
+    Call AppendZonePairs(outRows, colC2AB, colAB2C, rMach, rDan, rCol, rCode, rName, rCnt, rZone, rForecast)
 
     If outRows.Count = 0 Then
         MsgBox "現状ですでにゾーン間の入替候補はありませんでした(出荷回数順の理想配置と一致しています)。", vbInformation
@@ -802,11 +806,11 @@ Sub CreateZoneRebalancePlan()
     Const TABLE_HEADER_ROW As Long = 7
     wsOut.Range("B7:B100000").NumberFormat = "@"
     wsOut.Range("C7:C100000").NumberFormat = "@"
-    wsOut.Range("G7:G100000").NumberFormat = "@"
     wsOut.Range("H7:H100000").NumberFormat = "@"
-    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Value = Array("品名(移動元)", "品コード(移動元)", "ロケーション(移動元)", "出荷回数(移動元)", "⇒", "品名(移動先)", "品コード(移動先)", "ロケーション(移動先)", "出荷回数(移動先)", "ゾーン変化")
-    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Font.Bold = True
-    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).Interior.Color = RGB(220, 230, 255)
+    wsOut.Range("I7:I100000").NumberFormat = "@"
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 12)).Value = Array("品名(移動元)", "品コード(移動元)", "ロケーション(移動元)", "出荷回数(移動元)", "予測回数(移動元)", "⇒", "品名(移動先)", "品コード(移動先)", "ロケーション(移動先)", "出荷回数(移動先)", "予測回数(移動先)", "ゾーン変化")
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 12)).Font.Bold = True
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 12)).Interior.Color = RGB(220, 230, 255)
 
     Dim outR As Long: outR = TABLE_HEADER_ROW
     Dim rv As Variant
@@ -816,16 +820,18 @@ Sub CreateZoneRebalancePlan()
         wsOut.Cells(outR, 2).Value = rv(4)
         wsOut.Cells(outR, 3).Value = rv(1) & "-" & Format(rv(2), "00") & "-" & Format(rv(3), "00")
         wsOut.Cells(outR, 4).Value = rv(6)
-        wsOut.Cells(outR, 5).Value = "⇒"
-        wsOut.Cells(outR, 6).Value = rv(12)
-        wsOut.Cells(outR, 7).Value = rv(11)
-        wsOut.Cells(outR, 8).Value = rv(8) & "-" & Format(rv(9), "00") & "-" & Format(rv(10), "00")
-        wsOut.Cells(outR, 9).Value = rv(13)
-        wsOut.Cells(outR, 10).Value = rv(0) & "→" & rv(7) & " / " & rv(7) & "→" & rv(0)
+        wsOut.Cells(outR, 5).Value = rv(14)
+        wsOut.Cells(outR, 6).Value = "⇒"
+        wsOut.Cells(outR, 7).Value = rv(12)
+        wsOut.Cells(outR, 8).Value = rv(11)
+        wsOut.Cells(outR, 9).Value = rv(8) & "-" & Format(rv(9), "00") & "-" & Format(rv(10), "00")
+        wsOut.Cells(outR, 10).Value = rv(13)
+        wsOut.Cells(outR, 11).Value = rv(15)
+        wsOut.Cells(outR, 12).Value = rv(0) & "→" & rv(7) & " / " & rv(7) & "→" & rv(0)
     Next rv
 
-    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(outR, 10)).Columns.AutoFit
-    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 10)).AutoFilter
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(outR, 12)).Columns.AutoFit
+    wsOut.Range(wsOut.Cells(TABLE_HEADER_ROW, 1), wsOut.Cells(TABLE_HEADER_ROW, 12)).AutoFilter
 
     MsgBox "「ゾーンバランス」シートを作成しました。(" & outRows.Count & "件)", vbInformation
 End Sub
@@ -858,14 +864,14 @@ End Sub
 ' 「本来こちらへ移りたい」候補(colInto)と「本来あちらへ移りたい」候補(colOutOf)を
 ' 先頭(出荷回数が多い方)から順にペアにしてswapリスト(outRows)に追加する
 ' (件数が多い方の余りは、対になる相手が無いため今回は対象外とする)
-Private Sub AppendZonePairs(outRows As Collection, colInto As Collection, colOutOf As Collection, rMach() As Long, rDan() As Long, rCol() As Long, rCode() As String, rName() As String, rCnt() As Double, rZone() As String)
+Private Sub AppendZonePairs(outRows As Collection, colInto As Collection, colOutOf As Collection, rMach() As Long, rDan() As Long, rCol() As Long, rCode() As String, rName() As String, rCnt() As Double, rZone() As String, rForecast() As Double)
     Dim n As Long: n = colInto.Count
     If colOutOf.Count < n Then n = colOutOf.Count
     Dim k As Long
     For k = 1 To n
         Dim iA As Long: iA = colInto(k)
         Dim iB As Long: iB = colOutOf(k)
-        outRows.Add Array(rZone(iA), rMach(iA), rDan(iA), rCol(iA), rCode(iA), rName(iA), rCnt(iA), rZone(iB), rMach(iB), rDan(iB), rCol(iB), rCode(iB), rName(iB), rCnt(iB))
+        outRows.Add Array(rZone(iA), rMach(iA), rDan(iA), rCol(iA), rCode(iA), rName(iA), rCnt(iA), rZone(iB), rMach(iB), rDan(iB), rCol(iB), rCode(iB), rName(iB), rCnt(iB), rForecast(iA), rForecast(iB))
     Next k
 End Sub
 
