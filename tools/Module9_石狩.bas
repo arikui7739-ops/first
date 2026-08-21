@@ -796,7 +796,7 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
                 dictItemLocCount(itemCode) = dictItemLocCount(itemCode) + 1
                 dictItemForecastSum(itemCode) = dictItemForecastSum(itemCode) + IIf(forecastColIdx > 0, Val(wsData.Cells(r, forecastColIdx).Value), 0)
 
-                Dim locStr As String: locStr = mach & "-" & dan & "-" & colv
+                Dim locStr As String: locStr = mach & "-" & Format(dan, "00") & "-" & Format(colv, "00")
                 If dictItemLocations(itemCode) = "" Then
                     dictItemLocations(itemCode) = locStr
                 Else
