@@ -632,6 +632,10 @@ Sub CreateZoneRebalancePlan()
             Dim zone As String: zone = ""
             If mach >= 1 And mach <= ZONE_AB_MAX Then
                 zone = "AB"
+            ElseIf (mach >= 51 And mach <= 58) Or mach = 98 Then
+                ' 沼南の実機では51～58号機・98号機は拡張エリアのため、Cバラではなく拡張(X)として扱う
+                ' (ABとCバラの入替のみに絞っているため、この号機は入替候補にならない)
+                zone = "X"
             ElseIf mach >= ZONE_C_MIN And mach <= ZONE_C_MAX Then
                 zone = "C"
             ElseIf mach >= ZONE_X_MIN Then
@@ -712,12 +716,9 @@ Sub CreateZoneRebalancePlan()
 
     ' 現在のゾーンと、あるべきゾーンがズレている商品を、ズレの向きごとに集める
     ' (順位順=出荷回数の多い順に集まるので、影響の大きいズレから優先的にペアになる)
+    ' ABとCバラの入替のみを対象とする(拡張(X、51～58号機・98号機・70号機以上)は入替元・入替先にしない)
     Dim colC2AB As Collection: Set colC2AB = New Collection
     Dim colAB2C As Collection: Set colAB2C = New Collection
-    Dim colX2AB As Collection: Set colX2AB = New Collection
-    Dim colAB2X As Collection: Set colAB2X = New Collection
-    Dim colX2C As Collection: Set colX2C = New Collection
-    Dim colC2X As Collection: Set colC2X = New Collection
     For rank = 1 To m
         Dim oi As Long: oi = idx(rank)
         If idealZone(oi) <> rZone(oi) Then
@@ -725,18 +726,12 @@ Sub CreateZoneRebalancePlan()
             Select Case dirKey
                 Case "C>AB": colC2AB.Add oi
                 Case "AB>C": colAB2C.Add oi
-                Case "X>AB": colX2AB.Add oi
-                Case "AB>X": colAB2X.Add oi
-                Case "X>C": colX2C.Add oi
-                Case "C>X": colC2X.Add oi
             End Select
         End If
     Next rank
 
     Dim outRows As Collection: Set outRows = New Collection
     Call AppendZonePairs(outRows, colC2AB, colAB2C, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
-    Call AppendZonePairs(outRows, colX2AB, colAB2X, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
-    Call AppendZonePairs(outRows, colX2C, colC2X, rMach, rDan, rCol, rCode, rName, rCnt, rZone)
 
     If outRows.Count = 0 Then
         MsgBox "現状ですでにゾーン間の入替候補はありませんでした(出荷回数順の理想配置と一致しています)。", vbInformation
@@ -784,8 +779,8 @@ Sub CreateZoneRebalancePlan()
     wsOut.Range("C1").Value = "目標構成比"
     wsOut.Range("D1").Value = "施策後見込み構成比"
     wsOut.Range("A2").Value = "AB(1～46号機)"
-    wsOut.Range("A3").Value = "Cバラ(51～68号機)"
-    wsOut.Range("A4").Value = "X拡張(70号機以上)"
+    wsOut.Range("A3").Value = "Cバラ(59～68号機)"
+    wsOut.Range("A4").Value = "X拡張(51～58号機・98号機・70号機以上)"
     If sumAll > 0 Then
         wsOut.Range("B2").Value = sumAB / sumAll
         wsOut.Range("B3").Value = sumC / sumAll
