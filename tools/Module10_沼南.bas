@@ -531,9 +531,10 @@ Sub CreateZoneRebalancePlan()
     Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount, dictTargetRatio, catWeight, sizeWeight, weightWeightCoef)
 
     Const ZONE_AB_MAX As Long = 46
-    Const ZONE_C_MIN As Long = 51
-    Const ZONE_C_MAX As Long = 68
-    Const ZONE_X_MIN As Long = 70
+    Const ZONE_C1_MIN As Long = 61  ' Cバラ01
+    Const ZONE_C1_MAX As Long = 73
+    Const ZONE_C2_MIN As Long = 81  ' Cバラ02
+    Const ZONE_C2_MAX As Long = 93
     Const TARGET_AB As Double = 0.92
     Const TARGET_C As Double = 0.07
     Const TARGET_X As Double = 0.01
@@ -629,16 +630,15 @@ Sub CreateZoneRebalancePlan()
     For i = 1 To n
         If IsNumeric(dataArr(i, machColIdx)) And IsNumeric(dataArr(i, danColIdx)) And IsNumeric(dataArr(i, colColIdx)) Then
             Dim mach As Long: mach = CLng(dataArr(i, machColIdx))
+            ' 沼南の実機のCバラはC01(61～73号機)・C02(81～93号機)の2ブロック。
+            ' それ以外(51～58号機・98号機を含む)はAB・Cバラいずれでもないため拡張(X)として扱う
+            ' (ABとCバラの入替のみに絞っているため、拡張(X)の号機は入替候補にならない)
             Dim zone As String: zone = ""
             If mach >= 1 And mach <= ZONE_AB_MAX Then
                 zone = "AB"
-            ElseIf (mach >= 51 And mach <= 58) Or mach = 98 Then
-                ' 沼南の実機では51～58号機・98号機は拡張エリアのため、Cバラではなく拡張(X)として扱う
-                ' (ABとCバラの入替のみに絞っているため、この号機は入替候補にならない)
-                zone = "X"
-            ElseIf mach >= ZONE_C_MIN And mach <= ZONE_C_MAX Then
+            ElseIf (mach >= ZONE_C1_MIN And mach <= ZONE_C1_MAX) Or (mach >= ZONE_C2_MIN And mach <= ZONE_C2_MAX) Then
                 zone = "C"
-            ElseIf mach >= ZONE_X_MIN Then
+            Else
                 zone = "X"
             End If
             If zone <> "" Then
@@ -779,8 +779,8 @@ Sub CreateZoneRebalancePlan()
     wsOut.Range("C1").Value = "目標構成比"
     wsOut.Range("D1").Value = "施策後見込み構成比"
     wsOut.Range("A2").Value = "AB(1～46号機)"
-    wsOut.Range("A3").Value = "Cバラ(59～68号機)"
-    wsOut.Range("A4").Value = "X拡張(51～58号機・98号機・70号機以上)"
+    wsOut.Range("A3").Value = "Cバラ(61～73号機・81～93号機)"
+    wsOut.Range("A4").Value = "X拡張(AB・Cバラ以外すべて)"
     If sumAll > 0 Then
         wsOut.Range("B2").Value = sumAB / sumAll
         wsOut.Range("B3").Value = sumC / sumAll
