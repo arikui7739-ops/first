@@ -185,7 +185,8 @@ Private Sub LoadSettingsForChart(ByRef dictTargetByLabel As Object, ByRef abBloc
     Dim dictExcludedItemCode As Object: Set dictExcludedItemCode = CreateObject("Scripting.Dictionary")
     Dim ratioSheetName As String, maxSwapRows As Long, abSlotCount As Long
     Dim dictTargetRatioDummy As Object: Set dictTargetRatioDummy = CreateObject("Scripting.Dictionary")
-    Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount, dictTargetRatioDummy)
+    Dim catWeightDummy As Double, sizeWeightDummy As Double, weightWeightCoefDummy As Double
+    Call LoadExclusionSettings(dictExcludedMach, locMach, locDanFrom, locDanTo, locColFrom, locColTo, locCount, dictExcludedItemCode, ratioSheetName, maxSwapRows, abSlotCount, abBlockFrom, abBlockTo, abBlockCount, dictTargetRatioDummy, catWeightDummy, sizeWeightDummy, weightWeightCoefDummy)
 
     ' 「■号機別目標構成比」(Q:R列)はラベル文字列のまま読み込み直す(C01・C02・Xを保持するため)
     Dim wsSet As Worksheet
