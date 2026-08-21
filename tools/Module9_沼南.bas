@@ -724,9 +724,9 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
     Next hc
     If machColIdx = -1 Or danColIdx = -1 Or colColIdx = -1 Or itemCodeColIdx = -1 Then Exit Sub
 
-    Const DATE_COL_FIRST As Long = 7  ' G列
-    Const DATE_COL_LAST As Long = 16  ' P列(最大10列)
-    Const TOTAL_COL As Long = 17      ' Q列(実績の総計)
+    Const DATE_COL_FIRST As Long = 8  ' H列(ロケーション列の追加により1列後ろへ)
+    Const DATE_COL_LAST As Long = 17  ' Q列(最大10列)
+    Const TOTAL_COL As Long = 18      ' R列(実績の総計)
     Dim histSheetName As String: histSheetName = "品名実績"
 
     ' 既存シートがあれば、日付見出しと実績(品名コード→日付ごとの値)を退避しておく
@@ -747,6 +747,7 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
     Dim dictItemForecastSum As Object: Set dictItemForecastSum = CreateObject("Scripting.Dictionary")
     Dim dictItemName As Object: Set dictItemName = CreateObject("Scripting.Dictionary")
     Dim dictItemLocClass As Object: Set dictItemLocClass = CreateObject("Scripting.Dictionary")
+    Dim dictItemLocations As Object: Set dictItemLocations = CreateObject("Scripting.Dictionary") ' 品名コード→ロケーション文字列("号機-段-列"をカンマ区切りで列挙)
 
     Dim r As Long
     For r = HEADER_ROW + 1 To lastRow
@@ -766,10 +767,18 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
                     dictItemForecastSum.Add itemCode, 0
                     dictItemName.Add itemCode, IIf(itemNameColIdx > 0, Trim(CStr(wsData.Cells(r, itemNameColIdx).Value)), "")
                     dictItemLocClass.Add itemCode, IIf(locClassColIdx > 0, Trim(CStr(wsData.Cells(r, locClassColIdx).Value)), "")
+                    dictItemLocations.Add itemCode, ""
                 End If
                 dictItemHitsToday(itemCode) = dictItemHitsToday(itemCode) + hitVal
                 dictItemLocCount(itemCode) = dictItemLocCount(itemCode) + 1
                 dictItemForecastSum(itemCode) = dictItemForecastSum(itemCode) + IIf(forecastColIdx > 0, Val(wsData.Cells(r, forecastColIdx).Value), 0)
+
+                Dim locStr As String: locStr = mach & "-" & dan & "-" & colv
+                If dictItemLocations(itemCode) = "" Then
+                    dictItemLocations(itemCode) = locStr
+                Else
+                    dictItemLocations(itemCode) = dictItemLocations(itemCode) & ", " & locStr
+                End If
             End If
         End If
     Next r
@@ -792,8 +801,9 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
     wsOut.Name = histSheetName
 
     wsOut.Columns("A:A").NumberFormat = "@" ' コード(先頭ゼロ落ち防止)
+    wsOut.Columns("E:E").NumberFormat = "@" ' ロケーションが日付として自動変換されるのを防ぐ
 
-    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 6)).Value = Array("コード", "品名", "ロケ分類", "号機数", "予測回数", "")
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 7)).Value = Array("コード", "品名", "ロケ分類", "号機数", "ロケーション", "予測回数", "")
     Dim dNo As Long
     For dNo = 1 To UBound(finalDates)
         wsOut.Cells(1, DATE_COL_FIRST + dNo - 1).Value = FormatHistoryDateHeader(CDate(finalDates(dNo)))
@@ -811,7 +821,8 @@ Private Sub UpdateDailyItemHistory(dictLocationHits As Object, ByVal businessDat
         wsOut.Cells(outRow, 2).Value = dictItemName(ik)
         wsOut.Cells(outRow, 3).Value = dictItemLocClass(ik)
         wsOut.Cells(outRow, 4).Value = dictItemLocCount(ik)
-        wsOut.Cells(outRow, 5).Value = dictItemForecastSum(ik)
+        wsOut.Cells(outRow, 5).Value = dictItemLocations(ik)
+        wsOut.Cells(outRow, 6).Value = dictItemForecastSum(ik)
 
         Call WriteHistoryValues(wsOut, outRow, ik, ik, dictItemHitsToday, dictOldHistory, finalDates, DATE_COL_FIRST, TOTAL_COL, businessDateSerial)
     Next itemKeyV

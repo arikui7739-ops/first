@@ -583,8 +583,8 @@ Sub CreateZoneRebalancePlan()
     Set wsHist = ThisWorkbook.Sheets("品名実績")
     On Error GoTo 0
     If Not wsHist Is Nothing Then
-        Const HIST_DATE_COL_FIRST As Long = 7
-        Const HIST_DATE_COL_LAST As Long = 16
+        Const HIST_DATE_COL_FIRST As Long = 8  ' 「品名実績」にロケーション列が追加されたため1列後ろへ
+        Const HIST_DATE_COL_LAST As Long = 17
         Dim mondayCol As Long: mondayCol = -1
         Dim hdc As Long
         For hdc = HIST_DATE_COL_FIRST To HIST_DATE_COL_LAST
