@@ -494,8 +494,9 @@ End Sub
 ' AB(1～46号機)・Cバラ(51～68号機)・X拡張(70号機以上)の3ゾーン間で、
 ' 出荷回数の順位に応じたゾーンバランスを作成する。
 ' 出荷回数は「品名実績」(品名コード単位で蓄積した実績。商品が移動しても実績は
-' その商品についてくる)の月曜列を優先し、無ければ「予測データ」の
-' 「投入回数_曜日平均」で代用する。
+' その商品についてくる)の指定曜日列を優先し、無ければ「予測データ」の
+' 「投入回数_曜日平均」で代用する。「設定」シートの■ゾーンバランス確認基準を「予測」に
+' すると、実績を使わず「予測データ」の「投入回数_予測」をそのまま順位付けに使う。
 ' 各ゾーンの容量は実際にある間口数(該当ロケーション数)をそのまま使い、
 ' 出荷回数の多い順にAB→C→Xの優先度で「あるべきゾーン」を決める。
 ' 段(棚の高さ)はAB/C/Xで形状が異なる別ゾーンのため考慮せず、順位のズレ
@@ -551,6 +552,7 @@ Sub CreateZoneRebalancePlan()
     Dim itemCodeColIdx As Long: itemCodeColIdx = -1
     Dim itemNameColIdx As Long: itemNameColIdx = -1
     Dim wdAvgColIdx As Long: wdAvgColIdx = -1
+    Dim forecastColIdx As Long: forecastColIdx = -1
     Dim hc As Long
     For hc = 1 To lastCol
         Dim hName As String: hName = Trim(CStr(headerArr(1, hc)))
@@ -560,6 +562,7 @@ Sub CreateZoneRebalancePlan()
         If hName = "品名コード" Then itemCodeColIdx = hc
         If hName = "品名" Then itemNameColIdx = hc
         If hName = "投入回数_曜日平均" Then wdAvgColIdx = hc
+        If hName = "投入回数_予測" Then forecastColIdx = hc
     Next hc
     If machColIdx = -1 Or danColIdx = -1 Or colColIdx = -1 Or itemCodeColIdx = -1 Then
         MsgBox "「予測データ」シートに「号機」「段」「列」「品名コード」のいずれかの列が見つかりません。", vbExclamation
@@ -570,38 +573,42 @@ Sub CreateZoneRebalancePlan()
     ' (S71実績はロケーション単位でしか記録されないため、「日別実績」はロケーション基準で
     ' 商品が移動すると過去実績が古い商品のまま残ってしまう。「品名実績」は品名コード単位で
     ' 実績を蓄積しているため、商品が移動していても正しくその商品の実績を参照できる。
-    ' 対象曜日は「設定」シートの■ゾーンバランス確認曜日で変更できる(既定は月))
-    Dim targetWeekday As String: targetWeekday = GetZoneBalanceWeekday()
+    ' 確認基準は「設定」シートの■ゾーンバランス確認基準で変更できる(月～日の曜日、または
+    ' 「予測」=予測データの投入回数_予測をそのまま使う。既定は月)
+    Dim zoneBasis As String: zoneBasis = GetZoneBalanceBasis()
+    Dim useForecastBasis As Boolean: useForecastBasis = (zoneBasis = "予測")
     Dim dictMondayActual As Object: Set dictMondayActual = CreateObject("Scripting.Dictionary")
     Dim hasMondayCol As Boolean: hasMondayCol = False
-    Dim wsHist As Worksheet
-    On Error Resume Next
-    Set wsHist = ThisWorkbook.Sheets("品名実績")
-    On Error GoTo 0
-    If Not wsHist Is Nothing Then
-        Const HIST_DATE_COL_FIRST As Long = 8  ' 「品名実績」にロケーション列が追加されたため1列後ろへ
-        Const HIST_DATE_COL_LAST As Long = 17
-        Dim mondayCol As Long: mondayCol = -1
-        Dim hdc As Long
-        For hdc = HIST_DATE_COL_FIRST To HIST_DATE_COL_LAST
-            If InStr(CStr(wsHist.Cells(1, hdc).Value), "(" & targetWeekday & ")") > 0 Then mondayCol = hdc
-        Next hdc
-        If mondayCol > 0 Then
-            hasMondayCol = True
-            Dim histLastRow As Long: histLastRow = wsHist.Cells(wsHist.Rows.Count, 1).End(xlUp).Row
-            If histLastRow >= 2 Then
-                Dim histArr As Variant
-                histArr = wsHist.Range(wsHist.Cells(2, 1), wsHist.Cells(histLastRow, mondayCol)).Value
-                Dim hr As Long
-                For hr = 1 To UBound(histArr, 1)
-                    Dim hItemKey As String: hItemKey = Trim(CStr(histArr(hr, 1)))
-                    If hItemKey <> "" Then
-                        Dim hVal As Double: hVal = 0
-                        Dim hMondayVal As Variant: hMondayVal = histArr(hr, mondayCol)
-                        If IsNumeric(hMondayVal) Then hVal = CDbl(hMondayVal)
-                        dictMondayActual(hItemKey) = hVal
-                    End If
-                Next hr
+    If Not useForecastBasis Then
+        Dim wsHist As Worksheet
+        On Error Resume Next
+        Set wsHist = ThisWorkbook.Sheets("品名実績")
+        On Error GoTo 0
+        If Not wsHist Is Nothing Then
+            Const HIST_DATE_COL_FIRST As Long = 8  ' 「品名実績」にロケーション列が追加されたため1列後ろへ
+            Const HIST_DATE_COL_LAST As Long = 17
+            Dim mondayCol As Long: mondayCol = -1
+            Dim hdc As Long
+            For hdc = HIST_DATE_COL_FIRST To HIST_DATE_COL_LAST
+                If InStr(CStr(wsHist.Cells(1, hdc).Value), "(" & zoneBasis & ")") > 0 Then mondayCol = hdc
+            Next hdc
+            If mondayCol > 0 Then
+                hasMondayCol = True
+                Dim histLastRow As Long: histLastRow = wsHist.Cells(wsHist.Rows.Count, 1).End(xlUp).Row
+                If histLastRow >= 2 Then
+                    Dim histArr As Variant
+                    histArr = wsHist.Range(wsHist.Cells(2, 1), wsHist.Cells(histLastRow, mondayCol)).Value
+                    Dim hr As Long
+                    For hr = 1 To UBound(histArr, 1)
+                        Dim hItemKey As String: hItemKey = Trim(CStr(histArr(hr, 1)))
+                        If hItemKey <> "" Then
+                            Dim hVal As Double: hVal = 0
+                            Dim hMondayVal As Variant: hMondayVal = histArr(hr, mondayCol)
+                            If IsNumeric(hMondayVal) Then hVal = CDbl(hMondayVal)
+                            dictMondayActual(hItemKey) = hVal
+                        End If
+                    Next hr
+                End If
             End If
         End If
     End If
@@ -649,7 +656,9 @@ Sub CreateZoneRebalancePlan()
                         End If
                         If Not isItemExcluded Then
                             Dim cntVal As Double: cntVal = 0
-                            If hasMondayCol And dictMondayActual.Exists(itemCodeStr) Then
+                            If useForecastBasis Then
+                                If forecastColIdx > 0 Then cntVal = Val(dataArr(i, forecastColIdx))
+                            ElseIf hasMondayCol And dictMondayActual.Exists(itemCodeStr) Then
                                 cntVal = dictMondayActual(itemCodeStr)
                             ElseIf wdAvgColIdx > 0 Then
                                 cntVal = Val(dataArr(i, wdAvgColIdx))
@@ -801,8 +810,10 @@ Sub CreateZoneRebalancePlan()
     wsOut.Range("B2:D4").NumberFormat = "0.0%"
     wsOut.Range("A1:D1").Font.Bold = True
     wsOut.Range("A1:D4").Columns.AutoFit
-    If Not hasMondayCol Then
-        wsOut.Range("A5").Value = "※品名実績の" & targetWeekday & "曜実績が無いため、予測データの曜日平均で代用しています"
+    If useForecastBasis Then
+        wsOut.Range("A5").Value = "※「設定」シートの■ゾーンバランス確認基準が「予測」のため、予測データの投入回数_予測を使用しています"
+    ElseIf Not hasMondayCol Then
+        wsOut.Range("A5").Value = "※品名実績の" & zoneBasis & "曜実績が無いため、予測データの曜日平均で代用しています"
     End If
 
     Const TABLE_HEADER_ROW As Long = 7
@@ -905,15 +916,20 @@ Sub EnsureZoneRebalanceButton()
     Call LayoutPanelButtons
 End Sub
 
-' 「設定」シートの「ゾーンバランス確認曜日」(L14)を読み込む。
+' 「設定」シートの「ゾーンバランス確認基準」(L14)を読み込む。
+' 月～日の曜日1文字、または「予測」(予測データの投入回数_予測をそのまま使う)を受け付ける。
 ' 未入力・不正な値なら既定値「月」を使う
-Private Function GetZoneBalanceWeekday() As String
-    GetZoneBalanceWeekday = "月"
+Private Function GetZoneBalanceBasis() As String
+    GetZoneBalanceBasis = "月"
     Dim wsSet As Worksheet
     On Error Resume Next
     Set wsSet = ThisWorkbook.Sheets("設定")
     On Error GoTo 0
     If wsSet Is Nothing Then Exit Function
     Dim v As String: v = Trim(CStr(wsSet.Range("L14").Value))
-    If Len(v) = 1 And InStr("月火水木金土日", v) > 0 Then GetZoneBalanceWeekday = v
+    If v = "予測" Then
+        GetZoneBalanceBasis = v
+    ElseIf Len(v) = 1 And InStr("月火水木金土日", v) > 0 Then
+        GetZoneBalanceBasis = v
+    End If
 End Function

@@ -1896,8 +1896,9 @@ Sub EnsureExclusionSettingsSheet()
         "⑤属性考慮係数(L9～L11):在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込んだ場合のみ有効。" & _
         "入替候補の選定時、入替先号機の同カテゴリー品の集中度・サイズ差・重量差をスコアに軽く反映する" & _
         "(値が大きいほど強く反映)。各表の5行目以降に追加・削除して使ってください。" & _
-        "⑥ゾーンバランス確認曜日(K14/L14):ゾーンバランス(Module10)の出荷回数ランキングに使う「品名実績」の" & _
-        "曜日列(月・火・水・木・金・土・日)を指定する(既定は月)。" & _
+        "⑥ゾーンバランス確認基準(K14/L14):ゾーンバランス(Module10)の出荷回数ランキングに使う基準を指定する。" & _
+        "「品名実績」の曜日列(月・火・水・木・金・土・日)、または「予測」(予測データの投入回数_予測をそのまま使う)" & _
+        "のいずれか(既定は月)。" & _
         "⑦KPI判定基準:「KPI」シートに記録される各指標は、あらかじめ決められた基準に応じて緑(合格)・黄(注意)・" & _
         "赤(不合格)に自動で色分けされます(基準は「KPI」シート右側に一覧表示、この「設定」シートでは変更できません)。"
     wsSet.Range("A1").Font.Bold = True
@@ -1973,16 +1974,17 @@ Sub EnsureExclusionSettingsSheet()
     Call EnsureZoneWeekdaySetting(wsSet)
 End Sub
 
-' 「設定」シートに「ゾーンバランス確認曜日」(K14/L14)が無ければ追加する
+' 「設定」シートに「ゾーンバランス確認基準」(K14/L14)が無ければ追加する
 Sub EnsureZoneWeekdaySetting(wsSet As Worksheet)
     If Trim(CStr(wsSet.Range("K14").Value)) <> "" Then Exit Sub
 
-    wsSet.Range("K14").Value = "ゾーンバランス確認曜日"
+    wsSet.Range("K14").Value = "ゾーンバランス確認基準"
     wsSet.Range("K14").Font.Bold = True
-    wsSet.Range("L14").Value = "月" ' ゾーンバランスの出荷回数ランキングに使う「品名実績」の曜日列(月・火・水・木・金・土・日)
+    wsSet.Range("L14").Value = "月" ' ゾーンバランスの出荷回数ランキングに使う「品名実績」の曜日列(月・火・水・木・金・土・日)、
+                                    ' または「予測」(=予測データの投入回数_予測をそのまま使う)
     With wsSet.Range("L14").Validation
         .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="月,火,水,木,金,土,日"
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="月,火,水,木,金,土,日,予測"
     End With
 End Sub
 

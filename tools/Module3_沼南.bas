@@ -1827,8 +1827,8 @@ Sub EnsureOperationPanelSheet()
     panelDesc = panelDesc & _
         "③「予測グラフを作成」「実績グラフを作成」でグラフを作成(実績側はS71ファイルが必要)" & vbCrLf & _
         "④「号機間バランスを作成」で号機間バランスを作成(予測データの取込と、「設定」シートの■号機別目標構成比の入力が必要)" & vbCrLf & _
-        "⑤「ゾーンバランス作成」でゾーンバランスを作成(予測データの取込が必要。「品名実績」の月曜列があればそれを、" & _
-        "無ければ予測データの曜日平均を使う)" & vbCrLf & _
+        "⑤「ゾーンバランス作成」でゾーンバランスを作成(予測データの取込が必要。「設定」の■ゾーンバランス確認基準に" & _
+        "応じて「品名実績」の指定曜日実績、または「予測」なら予測データの投入回数_予測を使う)" & vbCrLf & _
         "⑥「在庫データを取り込む」で在庫状況ダウンロード(WF021L1形式)を取り込むと(任意)、①④の入替候補選定に" & _
         "サイズ・重量・カテゴリーの近さが反映されます(一度取り込めば以降のファイル選択は不要です)。" & vbCrLf & vbCrLf & _
         "【カスタマイズ】" & vbCrLf & _
@@ -2123,7 +2123,8 @@ Sub EnsureExclusionSettingsSheet()
         "ゾーンバランスは①②③の除外設定のみ共有し、この目標構成比は使いません" & _
         "(AB=1～46号機とCバラ=61～73号機・81～93号機の間で、出荷回数順に構成比92%・7%を目指します。" & _
         "それ以外の号機は拡張エリアとして入替の対象外です。出荷回数のランキングに使う「品名実績」の曜日は" & _
-        "■ゾーンバランス確認曜日で変更できます、既定は月曜)。"
+        "■ゾーンバランス確認基準で変更できます(既定は月曜。「予測」を選ぶと実績ではなく" & _
+        "予測データの投入回数_予測をそのまま順位付けに使います)。"
     wsSet.Range("A1").Value = wsSet.Range("A1").Value & _
         "⑦属性考慮係数(L8～L10):在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込んだ場合のみ有効。" & _
         "入替候補の選定時、入替先号機の同カテゴリー品の集中度・サイズ差・重量差をスコアに軽く反映する" & _
@@ -2194,16 +2195,17 @@ Sub EnsureExclusionSettingsSheet()
     Call EnsureZoneWeekdaySetting(wsSet)
 End Sub
 
-' 「設定」シートに「ゾーンバランス確認曜日」(K13/L13)が無ければ追加する
+' 「設定」シートに「ゾーンバランス確認基準」(K13/L13)が無ければ追加する
 Sub EnsureZoneWeekdaySetting(wsSet As Worksheet)
     If Trim(CStr(wsSet.Range("K13").Value)) <> "" Then Exit Sub
 
-    wsSet.Range("K13").Value = "ゾーンバランス確認曜日"
+    wsSet.Range("K13").Value = "ゾーンバランス確認基準"
     wsSet.Range("K13").Font.Bold = True
-    wsSet.Range("L13").Value = "月" ' ゾーンバランスの出荷回数ランキングに使う「品名実績」の曜日列(月・火・水・木・金・土・日)
+    wsSet.Range("L13").Value = "月" ' ゾーンバランスの出荷回数ランキングに使う「品名実績」の曜日列(月・火・水・木・金・土・日)、
+                                    ' または「予測」(=予測データの投入回数_予測をそのまま使う)
     With wsSet.Range("L13").Validation
         .Delete
-        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="月,火,水,木,金,土,日"
+        .Add Type:=xlValidateList, AlertStyle:=xlValidAlertStop, Formula1:="月,火,水,木,金,土,日,予測"
     End With
 End Sub
 
