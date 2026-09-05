@@ -8,8 +8,7 @@ Option Explicit
 ' 入替の相手先は必ず同じ段(例:46-02-05なら2段目)の中から選ぶ(段をまたぐ入替は行わない)。
 ' 除外号機・除外ロケーション・除外品コードは「設定」シートの設定に従う(Module3と共通)。
 ' 対象は「■ABブロック」の範囲内の号機のみ(Cバラ・拡張は対象外)。
-' 候補件数は「設定」シートの「ロケ変候補件数」で個別に設定できる(AB対面分散の
-' 「入替候補件数」とは別の設定)。
+' 候補件数は「設定」シートの「ロケ変候補件数」で個別に設定できる。
 ' 既存の同名シートは削除してから作り直すため、再実行すると内容が更新される
 ' ----------------------------------------------------
 
@@ -347,7 +346,7 @@ Sub CreateRelocationPlan()
     End If
     wsOut.Name = "号機間バランス"
 
-    ' 品コード・ロケーションは先頭ゼロ落ち・日付誤変換防止のため文字列表示にする(AB対面分散と同じ扱い)
+    ' 品コード・ロケーションは先頭ゼロ落ち・日付誤変換防止のため文字列表示にする
     wsOut.Columns("B:B").NumberFormat = "@"
     wsOut.Columns("C:C").NumberFormat = "@"
     wsOut.Columns("G:G").NumberFormat = "@"
@@ -359,7 +358,7 @@ Sub CreateRelocationPlan()
     wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
     wsOut.Range("A2:J2").Merge
-    wsOut.Cells(2, 1).Value = "「設定」シートの■号機別目標構成比に近づけるよう、目標超過号機の高頻度ロケーションと目標未達号機のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「号機-段-列」の表記です(AB対面分散と同じ)。右端の構成比は全ロケーション(Cバラ・拡張X含む)の合計に対する割合です。"
+    wsOut.Cells(2, 1).Value = "「設定」シートの■号機別目標構成比に近づけるよう、目標超過号機の高頻度ロケーションと目標未達号機のロケーションを、同じ段の中で入れ替える指示です。ロケーションは「号機-段-列」の表記です。右端の構成比は全ロケーション(Cバラ・拡張X含む)の合計に対する割合です。"
     wsOut.Cells(2, 1).HorizontalAlignment = xlLeft
 
     wsOut.Range("A4:J4").Value = Array("【移動元品】(交換品コード)", "移動元品コード", "移動元ロケーション", "移動元予測回数", "交換方向", "【移動先品】(交換対象品)", "移動先品コード", "移動先ロケーション", "移動先予測回数", "構成比(移動元/移動先:変更前→変更後)")
@@ -372,7 +371,7 @@ Sub CreateRelocationPlan()
     MsgBox "「号機間バランス」シートを作成しました。(" & outCnt & "件)", vbInformation
 End Sub
 
-' AB対面分散と同じ「号機-段-列」形式でロケーションを表記する(例:46-02-05)
+' 「号機-段-列」形式でロケーションを表記する(例:46-02-05)
 Private Function FormatLocationStr(ByVal mach As Long, ByVal dan As Long, ByVal col As Long) As String
     FormatLocationStr = mach & "-" & Format(dan, "00") & "-" & Format(col, "00")
 End Function

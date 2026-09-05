@@ -5,14 +5,13 @@ Option Explicit
 ' 構成比グラフの作成
 ' 「予測グラフ」:「予測データ」シート(Module8で取込済み)の投入回数_予測をゾーン別に集計してグラフ化する
 ' 「実績グラフ」:ピッキング実績ファイル(S71)をダイアログで選択し、ゾーン別ヒット数を集計してグラフ化する
-' レイアウトは「設定」シートの「■号機別目標構成比」と同じ考え方で、ABブロック内の号機は機番ペア(ゾーン)ごとに
-' 奇数号機を上向き・偶数号機を下向きに表示し(ABブロックの境界はGetMachPairLabelで判定するため、
-' 金沢のABブロック配置(1～24の1ブロック)にも正しく対応する)、Cバラ(C01・C02)・拡張(X)は
-' 上向きの単独項目として、必ずC01・C02・Xの順で追加する(実績側は号機の範囲で判定:ABブロック外かつ
+' 金沢は片面・編成の概念が無いため、沼南・石狩のような奇数偶数ペア表示はせず、ABブロック内の号機を
+' 1台ずつ独立した棒グラフで表示する(ABブロックの範囲はIsInABBlockで判定)。Cバラ(C01・C02)・拡張(X)は
+' 単独の項目として、必ずC01・C02・Xの順で追加する(実績側は号機の範囲で判定:ABブロック外かつ
 ' 61～66はC01、81～88はC02、それ以外はXという金沢の実際のラック配置に基づく固定ルール)。
 ' 「設定」シートに目標構成比が入力されていれば、実績/予測の比率と並べて目標比率も折れ線で比較できるようにする。
 ' データ表にはCバラ・拡張も含めるが、グラフにはABブロック内の号機のみを表示する(Cバラ・拡張はグラフの対象外)。
-' グラフの縦軸目盛りは予測・実績のグラフ間、また石狩のグラフとも見比べやすいよう固定スケール(既定は±4%・1%刻み)にし、
+' グラフの縦軸目盛りは予測・実績のグラフ間で見比べやすいよう固定スケール(既定は0～4%・1%刻み)にし、
 ' 実データがそれを超える場合のみ切り上げて広げる。
 ' 「実績グラフ」の作成と同時に、「日別実績」シート(品名コード・ロケ分類・品名・
 ' ロケーション・予測回数ごとの日別実績を並べた履歴表)も更新する。日別列はG～Pの最大10列で、
@@ -96,7 +95,7 @@ Sub CreateActualRatioChart()
     Application.DisplayAlerts = False
 
     ' E行(号機2桁+段2桁+列2桁の9文字区切り)からゾーンラベルを判定して集計する(除外設定・品コードは考慮しない生の実績)。
-    ' ABブロック内はGetMachPairLabel等と同じくIsInABBlockで判定し、ブロック外は金沢の実際のラック配置
+    ' ABブロック内はIsInABBlockで判定し、ブロック外は金沢の実際のラック配置
     ' (Cバラ01=61～66、Cバラ02=81～88、それ以外は拡張X)を号機の範囲で直接判定する。
     ' 併せて、号機+段+列単位の実績も集計する(「日別実績」の更新に使う)
     Dim dictActualByLabel As Object: Set dictActualByLabel = CreateObject("Scripting.Dictionary")
@@ -208,10 +207,8 @@ Private Sub LoadSettingsForChart(ByRef dictTargetByLabel As Object, ByRef abBloc
 End Sub
 
 ' ゾーンラベル別の実績・目標比率から、データ表とグラフを持つシートを作成する(既存の同名シートは削除して作り直す)。
-' ABブロック内の号機は機番ペア(ゾーン)ごとに奇数号機を正の値・偶数号機を負の値で持たせ、グラフ上で上下に分かれるようにする
-' (負の値はセルの表示形式でマイナス符号を隠し、絶対値の比率として見せる)。ゾーンの境界はGetMachPairLabelで
-' 判定するため、金沢のABブロック配置(1～24の1ブロック)にも正しく対応する。
-' Cバラ(C01・C02)・拡張(X)などAB以外のラベルは、データ表には奇数側の列に単独の項目として追加するが、
+' ABブロック内の号機は1台ずつ独立した行として比率を持たせる(金沢には奇数偶数ペアの概念が無いため)。
+' Cバラ(C01・C02)・拡張(X)などAB以外のラベルも同じ列に単独の項目として追加するが、
 ' グラフにはABブロック内の号機のみを表示する(グラフの対象範囲をABゾーン行までに限定する)
 Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As String, dictActualByLabel As Object, dictTargetByLabel As Object, abBlockFrom() As Long, abBlockTo() As Long, ByVal abBlockCount As Long)
     On Error Resume Next
@@ -239,66 +236,48 @@ Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As 
 
     Dim hasTarget As Boolean: hasTarget = (dictTargetByLabel.Count > 0)
 
-    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 5)).Merge
+    wsOut.Range(wsOut.Cells(1, 1), wsOut.Cells(1, 3)).Merge
     wsOut.Cells(1, 1).Value = "【" & chartTitle & "】作成日時: " & Format(Now, "yyyy/mm/dd hh:mm")
     wsOut.Cells(1, 1).Font.Bold = True: wsOut.Cells(1, 1).Font.Size = 12
     wsOut.Cells(1, 1).HorizontalAlignment = xlLeft
 
     Dim headerArr As Variant
-    headerArr = Array("ゾーン", "奇数比率", "偶数比率", "奇数目標比率", "偶数目標比率")
-    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Value = headerArr
-    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Interior.Color = RGB(220, 230, 255)
-    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 5)).Font.Bold = True
+    headerArr = Array("ゾーン", "比率", "目標比率")
+    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 3)).Value = headerArr
+    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 3)).Interior.Color = RGB(220, 230, 255)
+    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(3, 3)).Font.Bold = True
 
     Dim r As Long: r = 3
     Dim maxAbsVal As Double: maxAbsVal = 0
-    Dim zoneCount As Long: zoneCount = GetTotalZoneCount(abBlockFrom, abBlockTo, abBlockCount)
-    Dim z As Long
-    For z = 1 To zoneCount
-        r = r + 1
-        Dim pairLbl As String: pairLbl = GetMachPairLabel(z, abBlockFrom, abBlockTo, abBlockCount)
-        Dim pairParts() As String: pairParts = Split(pairLbl, "&")
-        Dim oddMach As Long: oddMach = CLng(pairParts(0))
-        Dim evenMach As Long: evenMach = CLng(pairParts(1))
-        Dim oddLabel As String: oddLabel = "AB" & Format(oddMach, "00")
-        Dim evenLabel As String: evenLabel = "AB" & Format(evenMach, "00")
-        wsOut.Cells(r, 1).Value = oddMach & "," & evenMach
+    Dim bi As Long, mach As Long
+    For bi = 1 To abBlockCount
+        For mach = abBlockFrom(bi) To abBlockTo(bi)
+            r = r + 1
+            Dim machLabel As String: machLabel = "AB" & Format(mach, "00")
+            wsOut.Cells(r, 1).Value = mach
 
-        Dim oddVal As Double: oddVal = 0
-        If dictActualByLabel.Exists(oddLabel) Then oddVal = dictActualByLabel(oddLabel)
-        Dim evenVal As Double: evenVal = 0
-        If dictActualByLabel.Exists(evenLabel) Then evenVal = dictActualByLabel(evenLabel)
+            Dim machVal As Double: machVal = 0
+            If dictActualByLabel.Exists(machLabel) Then machVal = dictActualByLabel(machLabel)
+            Dim machRatio As Double: machRatio = IIf(grandTotal > 0, machVal / grandTotal, 0)
+            wsOut.Cells(r, 2).Value = machRatio
+            wsOut.Cells(r, 2).NumberFormat = "0.0%"
+            If machRatio > maxAbsVal Then maxAbsVal = machRatio
 
-        Dim oddRatio As Double: oddRatio = IIf(grandTotal > 0, oddVal / grandTotal, 0)
-        Dim evenRatio As Double: evenRatio = IIf(grandTotal > 0, evenVal / grandTotal, 0)
-        wsOut.Cells(r, 2).Value = oddRatio
-        wsOut.Cells(r, 2).NumberFormat = "0.0%"
-        wsOut.Cells(r, 3).Value = -evenRatio
-        wsOut.Cells(r, 3).NumberFormat = "0.0%;0.0%"
-        If oddRatio > maxAbsVal Then maxAbsVal = oddRatio
-        If evenRatio > maxAbsVal Then maxAbsVal = evenRatio
-
-        If hasTarget Then
-            If dictTargetByLabel.Exists(oddLabel) Then
-                Dim oddTarget As Double: oddTarget = dictTargetByLabel(oddLabel)
-                wsOut.Cells(r, 4).Value = oddTarget
-                wsOut.Cells(r, 4).NumberFormat = "0.0%"
-                If oddTarget > maxAbsVal Then maxAbsVal = oddTarget
+            If hasTarget Then
+                If dictTargetByLabel.Exists(machLabel) Then
+                    Dim machTarget As Double: machTarget = dictTargetByLabel(machLabel)
+                    wsOut.Cells(r, 3).Value = machTarget
+                    wsOut.Cells(r, 3).NumberFormat = "0.0%"
+                    If machTarget > maxAbsVal Then maxAbsVal = machTarget
+                End If
             End If
-            If dictTargetByLabel.Exists(evenLabel) Then
-                Dim evenTarget As Double: evenTarget = dictTargetByLabel(evenLabel)
-                wsOut.Cells(r, 5).Value = -evenTarget
-                wsOut.Cells(r, 5).NumberFormat = "0.0%;0.0%"
-                If evenTarget > maxAbsVal Then maxAbsVal = evenTarget
-            End If
-        End If
-    Next z
+        Next mach
+    Next bi
 
     ' グラフに含めるのはここまで(ABブロック内の号機)。この後ろに追加するCバラ・拡張の行はデータ表のみに含め、グラフの対象範囲には含めない
     Dim lastZoneRow As Long: lastZoneRow = r
 
-    ' AB以外のラベル(Cバラ01・Cバラ02・拡張X)を、必ずこの順番で奇数側の列に単独の上向き項目として追加する
-    ' (奇数/偶数のペア概念が無いため偶数側は使わない。金沢の実際のラック配置に合わせた固定順)
+    ' AB以外のラベル(Cバラ01・Cバラ02・拡張X)を、必ずこの順番で単独の項目として追加する
     Dim extraLabels As Variant: extraLabels = Array("C01", "C02", "X")
     Dim ei As Long
     For ei = LBound(extraLabels) To UBound(extraLabels)
@@ -310,44 +289,43 @@ Private Sub BuildRatioChartSheet(ByVal sheetName As String, ByVal chartTitle As 
         wsOut.Cells(r, 2).Value = IIf(grandTotal > 0, extraVal / grandTotal, 0)
         wsOut.Cells(r, 2).NumberFormat = "0.0%"
         If hasTarget And dictTargetByLabel.Exists(ek) Then
-            wsOut.Cells(r, 4).Value = dictTargetByLabel(ek)
-            wsOut.Cells(r, 4).NumberFormat = "0.0%"
+            wsOut.Cells(r, 3).Value = dictTargetByLabel(ek)
+            wsOut.Cells(r, 3).NumberFormat = "0.0%"
         End If
     Next ei
 
     Dim lastDataRow As Long: lastDataRow = r
-    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastDataRow, 5)).Columns.AutoFit
+    wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastDataRow, 3)).Columns.AutoFit
 
-    ' グラフ(奇数号機を上向き・偶数号機を下向きの面グラフで表示。ABブロック内の号機のみが対象で、Cバラ・拡張は含めない。
+    ' グラフ(号機ごとに独立した棒グラフで表示。ABブロック内の号機のみが対象で、Cバラ・拡張は含めない。
     ' 目標構成比が入力されていれば、目標比率を折れ線で重ねて比較できるようにする)
-    Dim srcCols As Long: srcCols = IIf(hasTarget, 5, 3)
+    Dim srcCols As Long: srcCols = IIf(hasTarget, 3, 2)
     Dim srcRange As Range: Set srcRange = wsOut.Range(wsOut.Cells(3, 1), wsOut.Cells(lastZoneRow, srcCols))
 
     Dim chtObj As ChartObject
-    Set chtObj = wsOut.ChartObjects.Add(wsOut.Cells(3, 7).Left, wsOut.Cells(3, 7).Top, 900, 380)
+    Set chtObj = wsOut.ChartObjects.Add(wsOut.Cells(3, 5).Left, wsOut.Cells(3, 5).Top, 900, 380)
     With chtObj.Chart
         .SetSourceData Source:=srcRange
         .PlotBy = xlColumns
-        .ChartType = xlArea
+        .ChartType = xlColumnClustered
         .HasTitle = True
         .ChartTitle.Text = chartTitle
         .Axes(xlCategory).TickLabels.Font.Size = 7
         .HasLegend = True
         If hasTarget Then
-            .SeriesCollection(3).ChartType = xlLineMarkers
-            .SeriesCollection(4).ChartType = xlLineMarkers
+            .SeriesCollection(2).ChartType = xlLineMarkers
         End If
     End With
 
-    ' 縦軸の目盛りを固定スケールに統一する(既定は±4%・1%刻み。実データがこれを超える場合のみ1%単位で切り上げて広げる。
-    ' 予測・実績のグラフ間、石狩のグラフとも同じ基準にすることで見比べやすくする)
+    ' 縦軸の目盛りを固定スケールに統一する(既定は0～4%・1%刻み。実データがこれを超える場合のみ1%単位で切り上げて広げる。
+    ' 予測・実績のグラフ間で同じ基準にすることで見比べやすくする)
     Dim axisMax As Double: axisMax = AXIS_DEFAULT_MAX
     If maxAbsVal > axisMax Then axisMax = Application.WorksheetFunction.RoundUp(maxAbsVal / AXIS_UNIT, 0) * AXIS_UNIT
     With chtObj.Chart.Axes(xlValue)
-        .MinimumScale = -axisMax
+        .MinimumScale = 0
         .MaximumScale = axisMax
         .MajorUnit = AXIS_UNIT
-        .TickLabels.NumberFormat = "0%;0%"
+        .TickLabels.NumberFormat = "0%"
     End With
 End Sub
 
