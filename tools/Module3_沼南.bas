@@ -1373,7 +1373,7 @@ End Function
 ' 何もせずCFシートの内容だけで従来通り動作する。2種類のファイルをまとめて選択でき、
 ' 先頭行が"B"で始まるかどうかでどちらのファイルかを自動判別する。
 '   ロケーションマスタ:1行目"B"+日付、以降"E"+号機(2)+段(2)+列(2)+品コード(6)+…(固定長)
-'   品名マスタ:1行目から品コード(7桁)+…+品名(半角カナ、55～72文字目)+…(固定長128バイト)
+'   品名マスタ:1行目から品コード(9桁。実体は6桁で先頭に0が3つ付く)+…+品名(半角カナ、55～72文字目)+…(固定長128バイト)
 Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     Dim fd2 As Office.FileDialog
     Set fd2 = Application.FileDialog(msoFileDialogFilePicker)
@@ -1385,7 +1385,7 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
         If .Show = False Then Exit Sub
     End With
 
-    Dim dictItemNameByCode As Object: Set dictItemNameByCode = CreateObject("Scripting.Dictionary") ' 品コード(7桁文字列)→品名
+    Dim dictItemNameByCode As Object: Set dictItemNameByCode = CreateObject("Scripting.Dictionary") ' 品コード(9桁文字列)→品名
 
     Dim fIdx2 As Long, filePath2 As String, fileNo2 As Integer, firstLine As String, textLine2 As String
     For fIdx2 = 1 To fd2.SelectedItems.Count
@@ -1414,11 +1414,11 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
                     End If
                 Loop
             Else
-                ' 品名マスタ:1～7文字目=品コード(7桁)、55～72文字目=品名(半角カナ)
+                ' 品名マスタ:1～9文字目=品コード(9桁。実体は6桁で先頭に0が3つ付く)、55～72文字目=品名(半角カナ)
                 Dim nameLine As String: nameLine = firstLine
                 Do
-                    If Len(nameLine) >= 72 And IsNumeric(Left(nameLine, 7)) Then
-                        dictItemNameByCode(Left(nameLine, 7)) = Trim(Mid(nameLine, 55, 18))
+                    If Len(nameLine) >= 72 And IsNumeric(Left(nameLine, 9)) Then
+                        dictItemNameByCode(Left(nameLine, 9)) = Trim(Mid(nameLine, 55, 18))
                     End If
                     If EOF(fileNo2) Then Exit Do
                     Line Input #fileNo2, nameLine
@@ -1431,7 +1431,6 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     ' 品名マスタが読み込めた場合、ロケーション→品コードの対応(CF・ロケーションマスタ双方)を使って品名を上書きする。
     ' dictLocCodeの値はCF由来なら数値、ロケーションマスタ由来なら文字列と型が揃っていないため、
     ' 元の桁数のまま/先頭ゼロを1つ追加/先頭ゼロを1つ除去、の3通りで品名マスタと照合する
-    Dim matchedCount As Long: matchedCount = 0
     If dictItemNameByCode.Count > 0 Then
         Dim locKeyIter As Variant
         For Each locKeyIter In dictLocCode.Keys
@@ -1439,42 +1438,14 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
             If rawCode <> "" Then
                 If dictItemNameByCode.Exists(rawCode) Then
                     dictLocName(locKeyIter) = dictItemNameByCode(rawCode)
-                    matchedCount = matchedCount + 1
                 ElseIf dictItemNameByCode.Exists("0" & rawCode) Then
                     dictLocName(locKeyIter) = dictItemNameByCode("0" & rawCode)
-                    matchedCount = matchedCount + 1
                 ElseIf Left(rawCode, 1) = "0" And dictItemNameByCode.Exists(Mid(rawCode, 2)) Then
                     dictLocName(locKeyIter) = dictItemNameByCode(Mid(rawCode, 2))
-                    matchedCount = matchedCount + 1
                 End If
             End If
         Next locKeyIter
     End If
-
-    ' ▼▼▼ 診断用(品名不明の原因調査のため一時的に追加。原因が分かったら削除する) ▼▼▼
-    Dim diagMsg As String
-    diagMsg = "【診断情報】" & vbCrLf & _
-        "ロケーションマスタ読込件数: " & dictLocCode.Count & vbCrLf & _
-        "品名マスタ読込件数: " & dictItemNameByCode.Count & vbCrLf & _
-        "品名が判明した件数: " & matchedCount & " / " & dictLocCode.Count & vbCrLf & vbCrLf
-    Dim diagN As Long: diagN = 0
-    Dim diagKey As Variant
-    diagMsg = diagMsg & "[ロケーションマスタ側 品コードの例]" & vbCrLf
-    For Each diagKey In dictLocCode.Keys
-        If diagN >= 3 Then Exit For
-        Dim diagCode As String: diagCode = Trim(CStr(dictLocCode(diagKey)))
-        diagMsg = diagMsg & "  " & diagCode & "(" & Len(diagCode) & "桁)" & vbCrLf
-        diagN = diagN + 1
-    Next diagKey
-    diagN = 0
-    diagMsg = diagMsg & vbCrLf & "[品名マスタ側 品コード=品名の例]" & vbCrLf
-    For Each diagKey In dictItemNameByCode.Keys
-        If diagN >= 3 Then Exit For
-        diagMsg = diagMsg & "  " & diagKey & "(" & Len(CStr(diagKey)) & "桁) = " & dictItemNameByCode(diagKey) & vbCrLf
-        diagN = diagN + 1
-    Next diagKey
-    MsgBox diagMsg, vbInformation, "品名マスタ突合 診断"
-    ' ▲▲▲ 診断用ここまで ▲▲▲
 End Sub
 
 ' 在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込む。

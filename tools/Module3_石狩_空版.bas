@@ -1370,7 +1370,7 @@ End Function
 ' 何もせずCFシートの内容だけで従来通り動作する。2種類のファイルをまとめて選択でき、
 ' 先頭行が"B"で始まるかどうかでどちらのファイルかを自動判別する。
 '   ロケーションマスタ:1行目"B"+日付、以降"E"+機番(2)+段(2)+列(2)+品コード(6)+…(固定長)
-'   品名マスタ:1行目から品コード(7桁)+…+品名(半角カナ、55～72文字目)+…(固定長128バイト)
+'   品名マスタ:1行目から品コード(9桁。実体は6桁で先頭に0が3つ付く)+…+品名(半角カナ、55～72文字目)+…(固定長128バイト)
 Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     Dim fd2 As Office.FileDialog
     Set fd2 = Application.FileDialog(msoFileDialogFilePicker)
@@ -1382,7 +1382,7 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
         If .Show = False Then Exit Sub
     End With
 
-    Dim dictItemNameByCode As Object: Set dictItemNameByCode = CreateObject("Scripting.Dictionary") ' 品コード(7桁文字列)→品名
+    Dim dictItemNameByCode As Object: Set dictItemNameByCode = CreateObject("Scripting.Dictionary") ' 品コード(9桁文字列)→品名
 
     Dim fIdx2 As Long, filePath2 As String, fileNo2 As Integer, firstLine As String, textLine2 As String
     For fIdx2 = 1 To fd2.SelectedItems.Count
@@ -1411,11 +1411,11 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
                     End If
                 Loop
             Else
-                ' 品名マスタ:1～7文字目=品コード(7桁)、55～72文字目=品名(半角カナ)
+                ' 品名マスタ:1～9文字目=品コード(9桁。実体は6桁で先頭に0が3つ付く)、55～72文字目=品名(半角カナ)
                 Dim nameLine As String: nameLine = firstLine
                 Do
-                    If Len(nameLine) >= 72 And IsNumeric(Left(nameLine, 7)) Then
-                        dictItemNameByCode(Left(nameLine, 7)) = Trim(Mid(nameLine, 55, 18))
+                    If Len(nameLine) >= 72 And IsNumeric(Left(nameLine, 9)) Then
+                        dictItemNameByCode(Left(nameLine, 9)) = Trim(Mid(nameLine, 55, 18))
                     End If
                     If EOF(fileNo2) Then Exit Do
                     Line Input #fileNo2, nameLine
