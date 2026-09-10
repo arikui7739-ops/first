@@ -1431,6 +1431,7 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
     ' 品名マスタが読み込めた場合、ロケーション→品コードの対応(CF・ロケーションマスタ双方)を使って品名を上書きする。
     ' dictLocCodeの値はCF由来なら数値、ロケーションマスタ由来なら文字列と型が揃っていないため、
     ' 元の桁数のまま/先頭ゼロを1つ追加/先頭ゼロを1つ除去、の3通りで品名マスタと照合する
+    Dim matchedCount As Long: matchedCount = 0
     If dictItemNameByCode.Count > 0 Then
         Dim locKeyIter As Variant
         For Each locKeyIter In dictLocCode.Keys
@@ -1438,14 +1439,42 @@ Sub LoadItemMasterFilesIfSelected(dictLocCode As Object, dictLocName As Object)
             If rawCode <> "" Then
                 If dictItemNameByCode.Exists(rawCode) Then
                     dictLocName(locKeyIter) = dictItemNameByCode(rawCode)
+                    matchedCount = matchedCount + 1
                 ElseIf dictItemNameByCode.Exists("0" & rawCode) Then
                     dictLocName(locKeyIter) = dictItemNameByCode("0" & rawCode)
+                    matchedCount = matchedCount + 1
                 ElseIf Left(rawCode, 1) = "0" And dictItemNameByCode.Exists(Mid(rawCode, 2)) Then
                     dictLocName(locKeyIter) = dictItemNameByCode(Mid(rawCode, 2))
+                    matchedCount = matchedCount + 1
                 End If
             End If
         Next locKeyIter
     End If
+
+    ' ▼▼▼ 診断用(品名不明の原因調査のため一時的に追加。原因が分かったら削除する) ▼▼▼
+    Dim diagMsg As String
+    diagMsg = "【診断情報】" & vbCrLf & _
+        "ロケーションマスタ読込件数: " & dictLocCode.Count & vbCrLf & _
+        "品名マスタ読込件数: " & dictItemNameByCode.Count & vbCrLf & _
+        "品名が判明した件数: " & matchedCount & " / " & dictLocCode.Count & vbCrLf & vbCrLf
+    Dim diagN As Long: diagN = 0
+    Dim diagKey As Variant
+    diagMsg = diagMsg & "[ロケーションマスタ側 品コードの例]" & vbCrLf
+    For Each diagKey In dictLocCode.Keys
+        If diagN >= 3 Then Exit For
+        Dim diagCode As String: diagCode = Trim(CStr(dictLocCode(diagKey)))
+        diagMsg = diagMsg & "  " & diagCode & "(" & Len(diagCode) & "桁)" & vbCrLf
+        diagN = diagN + 1
+    Next diagKey
+    diagN = 0
+    diagMsg = diagMsg & vbCrLf & "[品名マスタ側 品コード=品名の例]" & vbCrLf
+    For Each diagKey In dictItemNameByCode.Keys
+        If diagN >= 3 Then Exit For
+        diagMsg = diagMsg & "  " & diagKey & "(" & Len(CStr(diagKey)) & "桁) = " & dictItemNameByCode(diagKey) & vbCrLf
+        diagN = diagN + 1
+    Next diagKey
+    MsgBox diagMsg, vbInformation, "品名マスタ突合 診断"
+    ' ▲▲▲ 診断用ここまで ▲▲▲
 End Sub
 
 ' 在庫データ(在庫状況ダウンロード・WF021L1形式のCSV、任意)を読み込む。
